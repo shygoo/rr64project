@@ -1,0 +1,687 @@
+<html>
+<head>
+<meta charset="utf-8">
+<title>Road Rash 64 Viewer</title>
+<link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+<style>
+label
+{
+    user-select: none;
+}
+
+body, input, button, label, select
+{
+    font-family: "Open Sans";
+}
+
+select
+{
+    padding: 1px 6px;
+}
+</style>
+<script src="js/three.js"></script>
+</head>
+<body style="background: #111; color: #FFF;">
+<div style="text-align: center;">
+    <div style="display: inline-block; margin: auto auto; text-align: left;">
+            <div style="padding-bottom: 10px; text-align: left;">ROM: <input type="file" id="file"></div>
+        <div id="container"></div>
+    </div>
+</div>
+
+<script>
+
+function Viewer(queryDomContainer)
+{
+    var _this = this;
+    this.scene = new THREE.Scene();
+    this.renderer = new THREE.WebGLRenderer({antialias: false});
+
+    this.objects = {
+        'main_mesh': { label: "Main mesh", visible: true, objects: [] }
+    }
+
+    this.initDOM(queryDomContainer);
+
+    this.dvRom = null;
+    this.dvGfx = null;
+    this.dvTransforms = null;
+
+    this.keysDown = {};
+
+    this.camSpeedZ = 0;
+    this.camSpeedX = 0;
+    this.camSpeedY = 0;
+
+    this.camRotSpeedX = 0;
+    this.camRotSpeedY = 0;
+
+    this.width = 1280;
+    this.height = 720;
+
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(this.width, this.height);
+    this.renderer.setScissorTest(true);
+    this.renderer.alpha = true;
+    this.renderer.setClearColor(0x555555, 1.0);
+    this.renderer.setViewport(0, 0, this.width, this.height);
+    this.renderer.setScissor(0, 0, this.width, this.height);
+
+    this.renderer.setClearColor(0x7B8CCE, 1.0);
+    this.scene.fog = new THREE.Fog(0x7B8CCE, 1, 65535);
+
+    this.camera = new THREE.PerspectiveCamera(60, this.width/this.height, 1, 65535);
+    this.camera.rotation.order = "YXZ";
+
+    this.camera.translateY(4000);
+
+    this.dom['render'].tabIndex = '0'
+    this.dom['render'].style.display = "inline-block";
+
+    this.dom['render'].onkeydown = function(e)
+    {
+        _this.keysDown[e.keyCode] = true;
+    	e.preventDefault();
+    	return false;
+    }
+
+    this.dom['render'].onkeyup = function(e)
+    {
+    	delete _this.keysDown[e.keyCode];
+    	e.preventDefault();
+    	return false;
+    }
+
+    this.dom['render'].oncontextmenu = function(e)
+    {
+        e.preventDefault();
+        return false;
+    }
+
+    this.dom['render'].onmousedown = function(e)
+    {
+        this.requestPointerLock();
+        this.focus();
+        e.preventDefault();
+        return false;
+    }
+
+    var lastMovementX = 0;
+    var lastMovementY = 0;
+
+    this.dom['render'].onmousemove = function(e)
+    {
+        if(e.buttons == 0)
+        {
+            return;
+        }
+
+        var movementX = e.movementX / 4;
+        var movementY = e.movementY / 4;
+
+        if(e.buttons == 1)
+        {
+            viewer.camera.translateX(-movementX * 5);
+            viewer.camera.translateY(movementY * 5);
+        }
+
+        if(e.buttons == 4)
+        {
+            viewer.camera.translateZ(-movementX * 5);
+            viewer.camera.translateZ(movementY * 5);
+        }
+
+        if(e.buttons == 2)
+        {
+            viewer.camera.rotateY(-movementX * 0.01);
+            viewer.camera.rotateX(-movementY * 0.01);
+            viewer.camera.rotation.z = 0;
+        }
+    }
+
+    this.dom['render'].onmouseup = function(e)
+    {
+        lastMovementX = 0;
+        lastMovementY = 0;
+        document.exitPointerLock();
+    }
+
+    const CAM_MV_SPD = 30;
+
+    this.keyEvents = {
+	    //27: function(){ _this.resetCamera() }, // esc - reset camera position
+	    87: function(viewer){ viewer.camSpeedZ = -CAM_MV_SPD; }, // w - move forward
+	    65: function(viewer){ viewer.camSpeedX = -CAM_MV_SPD; }, // a - pan left
+	    83: function(viewer){ viewer.camSpeedZ = CAM_MV_SPD; }, // s - move backward
+	    68: function(viewer){ viewer.camSpeedX = CAM_MV_SPD; }, // d - pan right
+	    90: function(viewer){ viewer.camSpeedY = -CAM_MV_SPD; }, // z - move down
+	    88: function(viewer){ viewer.camSpeedY = CAM_MV_SPD; }, // x - move up
+	    40: function(viewer){ viewer.camRotSpeedX = -20; }, // down - rotate down
+	    38: function(viewer){ viewer.camRotSpeedX =  20; }, // up - rotate up
+	    37: function(viewer){ viewer.camRotSpeedY =  20;;}, // left - rotate left
+	    39: function(viewer){ viewer.camRotSpeedY = -20;}  // right - rotate right
+    }
+}
+
+Viewer.prototype.initDOM = function(queryDomContainer)
+{
+    var _this = this;
+
+    var dom = {
+        'container': document.querySelector(queryDomContainer),
+        'toolbarPane': document.createElement('div'),
+        'mainPane': document.createElement('div'),
+        'togglePane': document.createElement('div'),
+        'render': this.renderer.domElement
+    };
+
+    dom['container'].appendChild(dom['toolbarPane']);
+    dom['container'].appendChild(dom['mainPane']);
+    dom['mainPane'].appendChild(dom['render']);
+    dom['mainPane'].appendChild(dom['togglePane']);
+
+    dom['container'].style = "background-color: #222; padding: 20px;";
+    dom['toolbarPane'].style = "padding-top: 10px; padding-bottom: 10px;";
+    dom['togglePane'].style = "padding-left: 10px; display: inline-block; vertical-align: top;";
+
+    this.dom = dom;
+}
+
+Viewer.prototype.animate = function()
+{
+    viewer.camera.translateZ(this.camSpeedZ);
+    viewer.camera.translateX(this.camSpeedX);
+    viewer.camera.translateY(this.camSpeedY);
+
+    viewer.camera.rotateX(this.camRotSpeedX / 1000);
+    viewer.camera.rotateY(this.camRotSpeedY / 1000);
+    viewer.camera.rotation.z = 0;
+
+    if(this.camSpeedZ < 0) this.camSpeedZ += 5;
+    if(this.camSpeedZ > 0) this.camSpeedZ -= 5;
+    if(this.camSpeedX > 0) this.camSpeedX -= 5;
+    if(this.camSpeedX < 0) this.camSpeedX += 5;
+    if(this.camSpeedY > 0) this.camSpeedY -= 5;
+    if(this.camSpeedY < 0) this.camSpeedY += 5;
+    if(this.camRotSpeedX > 0) this.camRotSpeedX -= 1;
+    if(this.camRotSpeedX < 0) this.camRotSpeedX += 1;
+    if(this.camRotSpeedY > 0) this.camRotSpeedY -= 1;
+    if(this.camRotSpeedY < 0) this.camRotSpeedY += 1;
+
+    for(var k in this.keysDown)
+    {
+        if(k in this.keyEvents) this.keyEvents[k](this);
+    }
+
+    this.renderer.render(this.scene, this.camera);
+    //console.log(this.renderer.info.render.calls);
+
+    requestAnimationFrame(this.animate.bind(this));
+}
+
+Viewer.prototype.sceneAdd = function(tag, objectArray)
+{
+    var visible = this.objects[tag].visible;
+    for(var i in objectArray)
+    {
+        objectArray[i].visible = visible;
+        this.scene.add(objectArray[i]);
+    }
+    this.objects[tag].objects.push(objectArray);
+}
+
+function dvalloc(numBytes)
+{
+    return new DataView(new ArrayBuffer(numBytes));
+}
+
+function dvpart(dv, offset, size)
+{
+    return new DataView(dv.buffer, dv.byteOffset + offset);
+}
+
+// in RAM: 8018E480 static file table, 801B2840 active file table
+// file system header: 0000003E 00DDF0C0 00000000 0001 1170 03E8 1324 039E 0346
+// entries 0x0000 through 0x0404 are texture files
+// entries 0x0405+ are mesh files
+
+const RA_FILE_TABLE = 0x0018D380; 
+const NUM_FILES = 0x16C2;
+
+const SIG_TEXTURE      = 0x16;
+const SIG_ANIM_TEXTURE = 0x17;
+const SIG_SUBMESH      = 0x3D;
+const SIG_FILE_TABLE   = 0x3E;
+const SIG_MESH         = 0x3F;
+
+const TEX_FMT_CI4      = 0x04;
+const TEX_FMT_CI8      = 0x08;
+
+Viewer.prototype.loadMap = function(mapNum)
+{
+    while(this.scene.children.length > 0)
+    {
+        this.scene.remove(this.scene.children[0]); 
+    }
+
+    this.textureFiles = [];
+
+    this.groups = {};
+    this.materials = [];
+
+    var defaultMaterial = new THREE.MeshBasicMaterial({
+        color: 0xFF0000
+    });
+
+    // collect textures
+    for(var i = 0; i < NUM_FILES; i++)
+    {
+        // 0x18 = file system header size
+        var entryOffset = RA_FILE_TABLE + 0x18 + (i * FileEntry.SIZE);
+        var fileEntry = new FileEntry(this.dvRom, entryOffset)
+
+        if(fileEntry.offset == 0)
+        {
+            this.textureFiles.push(null);
+            continue;
+        }
+
+        var fileAddress = fileEntry.offset + entryOffset;
+        var signature = this.dvRom.getUint32(fileAddress + 0x00);
+        var dvFile = dvpart(this.dvRom, fileAddress, fileEntry.size)
+
+        if(signature == SIG_TEXTURE || signature == SIG_ANIM_TEXTURE)
+        {
+            var textureFile = this.loadTexture(dvFile);
+            this.textureFiles.push(textureFile);
+        }
+        else
+        {
+            this.textureFiles.push(null);
+        }
+    }
+
+    // create material for each texture
+    for(var i = 0; i < NUM_FILES; i++)
+    {
+        var textureFile = this.textureFiles[i];
+
+        console.log(textureFile);
+
+        if(textureFile == null)
+        {
+            this.materials[i] = defaultMaterial;
+            continue;
+        }
+        
+        var dataTexture = new THREE.DataTexture(
+            textureFile.data,
+            textureFile.width,
+            textureFile.height,
+            THREE.RGBAFormat);
+
+        dataTexture.wrapS = THREE.RepeatWrapping;
+        dataTexture.wrapT = THREE.RepeatWrapping;
+        dataTexture.magFilter = THREE.LinearFilter;
+
+        this.materials[i] = new THREE.MeshBasicMaterial({
+            vertexColors: THREE.VertexColors,
+            side: THREE.BackSide,
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1,
+            map: dataTexture
+        });
+    }
+
+    for(var i = 0; i < NUM_FILES; i++)
+    {
+        // 0x18 = file system header size
+        var entryOffset = RA_FILE_TABLE + 0x18 + (i * FileEntry.SIZE);
+        var fileEntry = new FileEntry(this.dvRom, entryOffset)
+
+        if(fileEntry.offset == 0)
+        {
+            continue;
+        }
+
+        var fileAddress = fileEntry.offset + entryOffset;
+        var signature = this.dvRom.getUint32(fileAddress + 0x00);
+        var dvFile = dvpart(this.dvRom, fileAddress, fileEntry.size)
+
+        if(signature == SIG_MESH) // mesh file
+        {
+            this.loadMesh(dvFile);
+        }
+    }
+
+    var geometry = new THREE.BufferGeometry();
+
+    var positions = [];
+    var colors = [];
+    var uvs = [];
+    var indices = [];
+
+    for(var texIndex in this.groups)
+    {
+        var group = this.groups[texIndex];
+
+        var start = indices.length;
+        var count = group.indices.length;
+
+        var indexBase = positions.length / 3;
+
+        for(var i in group.positions) positions.push(group.positions[i]);
+        for(var i in group.colors) colors.push(group.colors[i]);
+        for(var i in group.uvs) uvs.push(group.uvs[i]);
+        for(var i in group.indices) indices.push(indexBase + group.indices[i]);
+
+        geometry.addGroup(start, count, texIndex);
+    }
+    
+    var fPositions = new Float32Array(positions);
+    var fColors = new Float32Array(colors);
+    var fUVs = new Float32Array(uvs);
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(fUVs, 2));
+    geometry.setIndex(indices);
+
+    var mesh = new THREE.Mesh(geometry, this.materials);
+    this.scene.add(mesh);
+
+    //var wfMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, wireframe: true, transparent: true, opacity: 0.01 });
+    //var wfMesh = new THREE.Mesh(geometry, wfMaterial);
+    //this.scene.add(wfMesh);
+}
+
+Viewer.prototype.loadTexture = function(dvTexture)
+{
+    // TODO handle animated textures
+    var textureHeader = new TextureHeader(dvTexture, 0);
+    var ciOffset = TextureHeader.SIZE;
+    var width = textureHeader.width;
+    var height = textureHeader.height;
+
+    var data = null;
+
+    if(textureHeader.format == TEX_FMT_CI4)
+    {
+        var tlutOffset = ciOffset + (width * height) / 2;
+        data = rgba32_texture_from_ci4(dvTexture, ciOffset, tlutOffset, width, height);
+    }
+    else if(textureHeader.format == TEX_FMT_CI8)
+    {
+        var tlutOffset = ciOffset + (width * height);
+        data = rgba32_texture_from_ci8(dvTexture, ciOffset, tlutOffset, width, height);
+    }
+    else
+    {
+        return null;
+    }
+
+    return { data: data, width: width, height: height };
+}
+
+Viewer.prototype.loadMesh = function(dvMesh)
+{
+    var meshHeader = new MeshHeader(dvMesh, 0);
+
+    for(var nSubMesh = 0; nSubMesh < meshHeader.numSubMeshes; nSubMesh++)
+    {
+        var entryOffset = 0xF0 + (nSubMesh * 12);
+        var subMeshInfo = new SubMeshInfo(dvMesh, entryOffset);
+        var dvSubMesh = dvpart(dvMesh, subMeshInfo.subMeshOffset + entryOffset, subMeshInfo.subMeshSize);
+        this.addSubMesh(dvSubMesh, meshHeader.worldX, meshHeader.worldY, meshHeader.worldZ);
+    }
+}
+
+function SPVertex(dv, offset)
+{
+    this.x = dv.getInt16(offset + 0x00);
+    this.y = dv.getInt16(offset + 0x02);
+    this.z = dv.getInt16(offset + 0x04);
+    this.s = dv.getInt16(offset + 0x08);
+    this.t = dv.getInt16(offset + 0x0A);
+    this.r = dv.getUint8(offset + 0x0C);
+    this.g = dv.getUint8(offset + 0x0D);
+    this.b = dv.getUint8(offset + 0x0E);
+    this.a = dv.getUint8(offset + 0x0F);
+}
+
+function FileEntry(dv, offset)
+{
+    this.offset = dv.getUint32(offset + 0x00);
+    this.size = dv.getUint32(offset + 0x04);
+    this.unk08 = dv.getUint32(offset + 0x08);
+}
+
+FileEntry.SIZE = 0x0C;
+
+function TextureHeader(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // 16 = single image, 17 = multiple images for animation
+    this.textureFileSize = dv.getUint32(offset + 0x04);
+    this.unk08 = dv.getUint32(offset + 0x08); // always FFFFFFFF
+    this.numTextures = dv.getUint16(offset + 0x20); // usually 1, 2+ if animated
+    this.paletteSize = dv.getUint16(offset + 0x22);
+    this.unk24 = dv.getUint16(offset + 0x24);   // 0x4000 = need alpha?, 0x0014 = ?
+    this.ciSize = dv.getUint16(offset + 0x26);
+    this.unk28 = dv.getFloat32(offset + 0x28);  // animation interval?
+    this.width = dv.getUint32(offset + 0x2C);
+    this.height = dv.getUint32(offset + 0x30);
+    this.format = dv.getUint32(offset + 0x34); // 4 = ci4, 8 = ci8
+    this.unk38 = dv.getUint32(offset + 0x38);  // always 0
+    this.unk3C = dv.getUint32(offset + 0x3C);  // points to last 0x40 bytes of file?
+}
+
+TextureHeader.SIZE = 0x40;
+
+function MeshHeader(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00);
+    this.meshFileSize = dv.getUint32(offset + 0x004);
+    this.numSubMeshes = dv.getUint16(offset + 0x00C);
+    this.offsNonGfx = dv.getUint32(offset + 0x010); // collision stuff?
+    // ...
+    this.worldX = dv.getFloat32(offset + 0x01C);
+    this.worldY = dv.getFloat32(offset + 0x020);
+    this.worldZ = dv.getFloat32(offset + 0x024);
+    // ...
+}
+
+function SubMeshInfo(dv, offset)
+{
+    this.subMeshOffset = dv.getUint32(offset + 0x00);
+    this.subMeshSize = dv.getUint32(offset + 0x04);
+    this.unk08 = dv.getUint32(offset + 0x08);
+}
+
+function SubMeshHeader(dv, offset)
+{
+    this.magic       = dv.getUint32(offset + 0x00); // 0x0000003D
+    this.size        = dv.getUint32(offset + 0x04);
+    this.unk08       = dv.getUint32(offset + 0x08);
+    this.numPackets  = dv.getUint16(offset + 0x0C);
+    this.numPackets2 = dv.getUint16(offset + 0x0E);
+    this.unk10       = dv.getUint16(offset + 0x10);
+    this.textureFileIndex = dv.getUint16(offset + 0x12); // texture file index
+    this.unk14       = dv.getUint32(offset + 0x14);
+}
+
+SubMeshHeader.SIZE = 0x18;
+
+function SubMeshPacketHeader(dv, offset)
+{
+    this.numTriangles = dv.getUint16(offset + 0x00);
+    this.numVertices  = dv.getUint16(offset + 0x02);
+    this.packetSize   = dv.getUint16(offset + 0x04);
+    this.verticesSize = dv.getUint16(offset + 0x06);
+}
+
+SubMeshPacketHeader.SIZE = 8;
+
+Viewer.prototype.addSubMesh = function(dv, worldX, worldY, worldZ)
+{
+    var subMeshHeader = new SubMeshHeader(dv, 0x00);
+    var packetOffset = SubMeshHeader.SIZE;
+
+    var texIndex = subMeshHeader.textureFileIndex;
+
+    if(!this.groups[texIndex])
+    {
+        this.groups[texIndex] = {
+            positions: [],
+            uvs: [],
+            colors: [],
+            indices: []
+        }
+    }
+
+    var group = this.groups[texIndex];
+
+    var material = this.materials[subMeshHeader.textureFileIndex];
+    var texWidth = material ? material.map.image.width : 1;
+    var texHeight = material ? material.map.image.height : 1;
+
+    for(var nPacket = 0; nPacket < subMeshHeader.numPackets; nPacket++)
+    {
+        var pktHeader = new SubMeshPacketHeader(dv, packetOffset);
+
+        var verticesOffset = packetOffset + SubMeshPacketHeader.SIZE;
+        var trianglesOffset = verticesOffset + pktHeader.verticesSize;
+
+        var indexBase = group.positions.length / 3;
+
+        for(var nVertex = 0; nVertex < pktHeader.numVertices; nVertex++)
+        {
+            var offset = verticesOffset + (nVertex * 16);
+            var vertex = new SPVertex(dv, offset);
+            group.positions.push(-(vertex.x + worldX), (vertex.z + worldZ) / 2, (vertex.y + worldY));
+            group.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
+            group.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
+        }
+
+        for(var nTri = 0; nTri < pktHeader.numTriangles; nTri++)
+        {
+            var offset = trianglesOffset + (nTri * 2);
+            var tri = dv.getUint16(offset);
+            var v0 = (tri >> 10) & 0x1F;
+            var v1 = (tri >>  5) & 0x1F;
+            var v2 = (tri >>  0) & 0x1F;
+            group.indices.push(indexBase + v0, indexBase + v1, indexBase + v2);
+        }
+
+        packetOffset += pktHeader.packetSize;
+    }
+}
+
+function rgba32_texture_from_ci8(dv, ciOffset, tlutOffset, width, height)
+{
+    var numTexels = width * height;
+    var data = new Uint8Array(numTexels * 4);
+
+    for(var i = 0; i < numTexels; i++)
+    {
+        var ci = dv.getUint8(ciOffset + i);
+        var texel = dv.getUint16(tlutOffset + ci*2);
+        const factor = 0xFF / 0x1F;
+        data[i*4+0] = (((texel >> 11) & 0x1F) * factor) | 0;
+        data[i*4+1] = (((texel >>  6) & 0x1F) * factor) | 0;
+        data[i*4+2] = (((texel >>  1) & 0x1F) * factor) | 0;
+        data[i*4+3] = (texel & 1) * 255;
+    }
+
+    return data;
+}
+
+function rgba32_texture_from_ci4(dv, ciOffset, tlutOffset, width, height)
+{
+    var numTexels = width * height;
+    var data = new Uint8Array(numTexels * 4);
+
+    for(var i = 0; i < numTexels/2; i++)
+    {
+        var byte = dv.getUint8(ciOffset + i);
+        var ci0 = (byte & 0xF0) >> 4;
+        var ci1 = (byte & 0x0F);
+        var texel0 = dv.getUint16(tlutOffset + ci0*2);
+        var texel1 = dv.getUint16(tlutOffset + ci1*2);
+        const factor = 0xFF / 0x1F;
+        data[i*8+0] = (((texel0 >> 11) & 0x1F) * factor) | 0;
+        data[i*8+1] = (((texel0 >>  6) & 0x1F) * factor) | 0;
+        data[i*8+2] = (((texel0 >>  1) & 0x1F) * factor) | 0;
+        data[i*8+3] = (texel0 & 1) * 255;
+        data[i*8+4] = (((texel1 >> 11) & 0x1F) * factor) | 0;
+        data[i*8+5] = (((texel1 >>  6) & 0x1F) * factor) | 0;
+        data[i*8+6] = (((texel1 >>  1) & 0x1F) * factor) | 0;
+        data[i*8+7] = (texel1 & 1) * 255;
+    }
+
+    return data;
+}
+
+Viewer.prototype.loadRom = function(abRom)
+{
+    this.abRom = abRom;
+    this.dvRom = new DataView(abRom);
+
+    this.loadMap(0);
+    //this.dom['select'].removeAttribute('disabled');
+}
+
+var viewer = new Viewer('#container');
+viewer.animate();
+
+//////////////////////////////////////////////////
+
+Number.prototype.hex = function(len)
+{
+    len = len || 8;
+    var s = this.toString(16).toUpperCase();
+    while(s.length < len) s = "0" + s;
+    return s;
+}
+
+function attachFileReader(query, onloadend)
+{
+    var domFileInput = document.querySelector(query);
+    var reader = new FileReader();
+    reader.onloadend = function()
+    {
+        onloadend(reader.result);
+    }
+
+    domFileInput.addEventListener('change', function()
+    {
+        reader.readAsArrayBuffer(domFileInput.files[0]);
+    });
+}
+
+attachFileReader('#file', function(ab)
+{
+    viewer.loadRom(ab);
+})
+
+document.body.ondragenter = function(e){e.preventDefault();}
+document.body.ondragover = function(e){e.preventDefault();}
+
+document.body.ondrop = function(e)
+{
+    e.preventDefault();
+
+    if(e.dataTransfer.files)
+    {
+        var file = e.dataTransfer.files[0];
+        var reader = new FileReader();
+        reader.onloadend = function()
+        {
+            viewer.loadRom(reader.result);
+        }
+        reader.readAsArrayBuffer(file);
+    }
+}
+</script>
+</body>
+</html>
