@@ -306,8 +306,6 @@ Viewer.prototype.loadMap = function(mapNum)
     {
         var textureFile = this.textureFiles[i];
 
-        console.log(textureFile);
-
         if(textureFile == null)
         {
             this.materials[i] = defaultMaterial;
@@ -628,7 +626,6 @@ Viewer.prototype.loadRom = function(abRom)
     this.dvRom = new DataView(abRom);
 
     this.loadMap(0);
-    //this.dom['select'].removeAttribute('disabled');
 }
 
 var viewer = new Viewer('#container');
