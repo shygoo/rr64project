@@ -8,4 +8,4 @@ Hacking notes and tools for Road Rash 64
 
 [Path data viewer](https://htmlpreview.github.io/?https://github.com/shygoo/rr64project/blob/master/path-viewer-2d.html) ([Source](https://github.com/shygoo/rr64project/blob/master/path-viewer-2d.html))
 
-![path-viewer-screenshot](https://i.imgur.com/TP0Mj12.png)
+![path-viewer-screenshot](https://i.imgur.com/mXe0IaP.png)

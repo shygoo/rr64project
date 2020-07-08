@@ -2,56 +2,380 @@
 <head>
 <meta charset="utf-8">
 <title>Road Rash 64 Path Viewer</title>
+<link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+<style>
+    label
+    {
+        user-select: none;
+    }
+    
+    body, input, button, label, select
+    {
+        font-family: "Open Sans";
+    }
+    
+    select
+    {
+        padding: 1px 6px;
+    }
+    </style>
 </head>
 <body>
-ROM: <input id="file" type="file"/><br>
-<canvas id="canvas" style="width: 1600px; height: 1600px; background-color: #000;" width="1600" height="1600"></canvas>
+<div style="margin-bottom: 10px;">ROM: <input id="file" type="file"/></div>
+<div id="container"></div>
+
 <script>
 const raUnkFile = 0x000AA4C0;
 const raPathData = raUnkFile + 0x418;
 const NUM_POINTS = 3053;
 
-const width = 800;
-const height = 800;
-const scale = 0.05;
+const raRaceTable = 0xB67C4;
+const NUM_RACES = 58;
 
-var domCanvas = document.querySelector('#canvas');
-var ctx = domCanvas.getContext('2d');
+var viewer = new Viewer('#container');
 
-domCanvas.style.width = width + 'px';
-domCanvas.style.height = height + 'px';
-domCanvas.setAttribute('width', width);
-domCanvas.setAttribute('height', height);
-
-function loadRom(ab)
+function Viewer(containerDomQuery)
 {
-    var dvRom = new DataView(ab);
+    this.dvRom = null;
+    this.racePins = null;
+    this.width = 900;
+    this.height = 820;
+    this.scale = 0.05;
 
-    ctx.fillStyle = "#111";
-    ctx.fillRect(0, 0, width, height);
+    this.updating = false;
 
+    this.domContainer = document.querySelector(containerDomQuery);
+    
+    this.domCanvas = document.createElement('canvas');
+    this.domRaceMenu = document.createElement('div');
+
+    this.domCanvas.style = 'display: inline-block; vertical-align: top;';
+    this.domRaceMenu.style = 'display: inline-block; font-size: 11px; user-select: none; overflow: auto; width: 200px; max-height: ' + this.height + 'px;';
+
+    this.domContainer.appendChild(this.domCanvas);
+    this.domContainer.appendChild(this.domRaceMenu);
+
+    this.ctx = this.domCanvas.getContext('2d');
+
+    this.domCanvas.style.width = this.width + 'px';
+    this.domCanvas.style.height = this.height + 'px';
+    this.domCanvas.setAttribute('width', this.width);
+    this.domCanvas.setAttribute('height', this.height);
+}
+
+Viewer.prototype.clearScreen = function()
+{
+    this.ctx.fillStyle = "#111";
+    this.ctx.fillRect(0, 0, this.width, this.height);
+}
+
+Viewer.prototype.drawPaths = function()
+{
     for(var i = 0; i < NUM_POINTS; i++)
     {
         var offset = raPathData + i * 16;
-        var unk00 = dvRom.getUint8(offset + 0x00);
-        var unk04 = dvRom.getUint32(offset + 0x04);
-        var x = dvRom.getFloat32(offset + 0x08);
-        var z = dvRom.getFloat32(offset + 0x0C);
+        var unk00 = this.dvRom.getUint8(offset + 0x00);
+        var unk01 = this.dvRom.getUint8(offset + 0x01);
+        var unk02 = this.dvRom.getUint8(offset + 0x02);
+        var unk03 = this.dvRom.getUint8(offset + 0x03);
+        var unk04 = this.dvRom.getUint32(offset + 0x04);
+        var x = this.dvRom.getFloat32(offset + 0x08);
+        var z = this.dvRom.getFloat32(offset + 0x0C);
 
-        if(unk00 == 0x05) // dunno
+        if(unk00 == 0x05)
+        {
+            // todo
+            //var unk08 = this.dvRom.getUint32(offset + 0x08);
+            //var unk0C = this.dvRom.getUint32(offset + 0x0C);
+            //console.log(unk00, unk01, unk02, unk03, unk04.toString(16), unk08.toString(16), unk0C.toString(16));
             continue;
+        }
+            
+
+        var dotSize = 1;
 
         switch(unk00)
         {
-        case 1: ctx.fillStyle = '#F00'; break;
-        case 2: ctx.fillStyle = '#0F0'; break;
-        case 3: ctx.fillStyle = '#0FF'; break;
-        case 4: ctx.fillStyle = '#FF0'; break;
-        default: ctx.fillStyle = "#FFF"; break;
+        case 1: this.ctx.fillStyle = '#FFF'; break;
+        case 2: this.ctx.fillStyle = '#0FF'; dotSize = 3;break;
+        case 3: this.ctx.fillStyle = '#F0F'; dotSize = 3; break;
+        case 4: this.ctx.fillStyle = '#999'; break;
+        default: this.ctx.fillStyle = "#FFF"; break;
         }
 
-        ctx.fillRect(Math.round(width/2 + -x*scale), Math.round(height/2 + z*scale), 1, 1);
+        var screenX = Math.round(this.width/2 + -x*this.scale);
+        var screenY = Math.round(this.height/2 + z*this.scale);
+
+        if(dotSize == 3){screenX-=1;screenY-=1;}
+
+        this.ctx.fillRect(screenX, screenY, dotSize, dotSize);
     }
+}
+
+Viewer.prototype.redraw = function(ctx, dvRom)
+{
+    if(this.updating)
+    {
+        return;
+    }
+
+    this.clearScreen();
+    this.drawPaths();
+    this.racePins.draw();
+}
+
+Viewer.prototype.toggleAllPins = function(bVisible)
+{
+    var _this = this;
+
+    this.updating = true;
+
+    this.domRaceMenu.querySelectorAll('input[type="checkbox"].race').forEach(domCheckbox => {
+        var startPinIdx = domCheckbox.getAttribute('data-start-pin') | 0;
+        var endPinIdx = domCheckbox.getAttribute('data-end-pin') | 0;
+        _this.racePins.setPinVisible(startPinIdx, bVisible);
+        _this.racePins.setPinVisible(endPinIdx, bVisible);
+        domCheckbox.checked = bVisible;
+    });
+
+    this.updating = false;
+    this.redraw();
+}
+
+Viewer.prototype.initRacePins = function()
+{
+    var _this = this;
+    this.racePins = new PinCollection(this.ctx);
+    var dv = this.dvRom;
+
+    var domDiv = document.createElement('div');
+    var domLabel = document.createElement('label');
+    var domCheck = document.createElement('input');
+    domCheck.checked = true;
+
+    domLabel.appendChild(domCheck);
+    domCheck.setAttribute('type', 'checkbox');
+    domLabel.appendChild(new Text("(Show/hide all)"));
+    domDiv.appendChild(domLabel);
+    this.domRaceMenu.appendChild(domDiv);
+
+    domCheck.addEventListener('change', function(e)
+    {
+        _this.toggleAllPins(e.target.checked);
+    })
+
+    for(var i = 0; i < NUM_RACES; i++)
+    {
+        var offset = raRaceTable + (i * 0x4C);
+        var raceName = dvgetstr(dv, offset);
+        var startX = dv.getFloat32(offset + 0x34);
+        var startZ = dv.getFloat32(offset + 0x38);
+        var unk3C = dv.getFloat32(offset + 0x3C);
+        var endX = dv.getFloat32(offset + 0x40);
+        var endZ = dv.getFloat32(offset + 0x44);
+        var unk48 = dv.getFloat32(offset + 0x48);
+
+        var startScreenX = Math.round(this.width/2 + -startX*this.scale);
+        var startScreenY = Math.round(this.height/2 + startZ*this.scale);
+        var endScreenX = Math.round(this.width/2 + -endX*this.scale);
+        var endScreenY = Math.round(this.height/2 + endZ*this.scale);
+
+        var startPinIdx = this.racePins.addPin(raceName, startScreenX, startScreenY, '#0F0', 'rgba(16, 50, 16, 0.8)');
+        var endPinIdx = this.racePins.addPin(raceName, endScreenX, endScreenY, '#F00', 'rgba(50, 16, 16, 0.8)');
+
+        var domDiv = document.createElement('div');
+        var domLabel = document.createElement('label');
+        var domCheck = document.createElement('input');
+
+        domCheck.checked = true;
+
+        domCheck.setAttribute('data-start-pin', startPinIdx);
+        domCheck.setAttribute('data-end-pin', endPinIdx);
+        domCheck.setAttribute('type', 'checkbox');
+        domCheck.setAttribute('class', 'race');
+        domLabel.appendChild(domCheck);
+        domLabel.appendChild(new Text(raceName));
+        domDiv.appendChild(domLabel);
+        this.domRaceMenu.appendChild(domDiv);
+
+        domCheck.addEventListener('change', function(e)
+        {
+            var startPinIdx = e.target.getAttribute('data-start-pin') | 0;
+            var endPinIdx = e.target.getAttribute('data-end-pin') | 0;
+            var checked = e.target.checked;
+
+            _this.racePins.setPinVisible(startPinIdx, checked);
+            _this.racePins.setPinVisible(endPinIdx, checked);
+            _this.redraw();
+        });
+
+        domDiv.addEventListener('mouseenter', function(e)
+        {
+            var domCheck = e.target.querySelector('input[type="checkbox"].race');
+
+            if(!domCheck.checked)
+            {
+                var startPinIdx = domCheck.getAttribute('data-start-pin') | 0;
+                var endPinIdx = domCheck.getAttribute('data-end-pin') | 0;
+
+                _this.racePins.setPinVisible(startPinIdx, true);
+                _this.racePins.setPinVisible(endPinIdx, true);
+                _this.redraw();
+            }
+        });
+
+        domDiv.addEventListener('mouseleave', function(e)
+        {
+            var domCheck = e.target.querySelector('input[type="checkbox"]');
+
+            if(!domCheck.checked)
+            {
+                var startPinIdx = domCheck.getAttribute('data-start-pin') | 0;
+                var endPinIdx = domCheck.getAttribute('data-end-pin') | 0;
+
+                _this.racePins.setPinVisible(startPinIdx, false);
+                _this.racePins.setPinVisible(endPinIdx, false);
+                _this.redraw();
+            }
+        })
+    }
+}
+
+Viewer.prototype.loadRom = function(ab)
+{
+    this.dvRom = new DataView(ab);
+    this.initRacePins();
+    this.redraw();
+}
+
+////////////
+
+function PinCollection(ctx)
+{
+    this.ctx = ctx;
+    this.pins = [];
+}
+
+PinCollection.prototype.addPin = function(text, x, y, fgColor, bgColor)
+{
+    var textMetrics = this.ctx.measureText(text);
+    var textWidth = textMetrics.width;
+    var textHeight = textMetrics.actualBoundingBoxAscent + textMetrics.fontBoundingBoxDescent;
+
+    var pin = {
+        originX: x,
+        originY: y,
+        labelX0: x + 1,
+        labelY0: y - 20,
+        labelX1: x + textWidth + 4 + 1,
+        labelY1: y - 20 + textHeight + 4,
+        text: text,
+        fgColor: fgColor,
+        bgColor: bgColor,
+        bVisible: true
+    };
+
+    var pinIndex = this.pins.length;
+
+    this.fixLabelPosition(pin);
+    this.pins.push(pin);
+
+    return pinIndex;
+}
+
+PinCollection.prototype.setPinVisible = function(index, bVisible)
+{
+    this.pins[index].bVisible = bVisible;
+}
+
+PinCollection.prototype.fixLabelPosition = function(pin)
+{
+    var ovlPin;
+    while(ovlPin = this.labelOverlaps(pin))
+    {
+        var height = (pin.labelY1 - pin.labelY0);
+        pin.labelY1 = (ovlPin.labelY0 - 1);
+        pin.labelY0 = pin.labelY1 - height;
+    }
+}
+
+PinCollection.prototype.labelOverlaps = function(pin)
+{
+    if(this.pins.length == 0)
+    {
+        return false;
+    }
+
+    for(var i = 0; i < this.pins.length; i++)
+    {
+        if(pin.labelX0 > this.pins[i].labelX1 ||
+           pin.labelX1 < this.pins[i].labelX0 ||
+           pin.labelY0 > this.pins[i].labelY1 ||
+           pin.labelY1 < this.pins[i].labelY0)
+        {
+            continue;
+        }
+
+        return this.pins[i];
+    }
+
+    return false;
+}
+
+PinCollection.prototype.draw = function()
+{
+    this.ctx.textBaseline = 'top';
+
+    // draw origin points and lines
+    for(var i = 0; i < this.pins.length; i++)
+    {
+        var pin = this.pins[i];
+
+        if(!pin.bVisible)
+        {
+            continue;
+        }
+
+        this.ctx.fillStyle = pin.fgColor;
+        this.ctx.fillRect(pin.originX - 2, pin.originY - 2, 5, 5);
+        this.ctx.fillRect(pin.labelX0 - 1, pin.labelY0, 1, pin.originY - pin.labelY0);
+    }
+
+    // draw label rects and text
+    for(var i = 0; i < this.pins.length; i++)
+    {
+        var pin = this.pins[i];
+
+        if(!pin.bVisible)
+        {
+            continue;
+        }
+
+        this.ctx.fillStyle = pin.bgColor;
+        this.ctx.fillRect(
+            pin.labelX0,
+            pin.labelY0,
+            pin.labelX1 - pin.labelX0,
+            pin.labelY1 - pin.labelY0);
+
+        this.ctx.fillStyle = pin.fgColor;
+        this.ctx.fillText(pin.text, pin.labelX0 + 2, pin.labelY0 + 2);
+    }
+}
+
+function dvgetstr(dv, offset)
+{
+    var s = "";
+    for(var i = 0;; i++)
+    {
+        var c = dv.getUint8(offset + i);
+        if(c == 0)
+        {
+            break;
+        }
+        s += String.fromCharCode(c);
+    }
+    return s;
 }
 
 function attachFileReader(query, onloadend)
@@ -71,7 +395,7 @@ function attachFileReader(query, onloadend)
 
 attachFileReader('#file', function(ab)
 {
-    loadRom(ab);
+    viewer.loadRom(ab);
 })
 </script>
 </body>
