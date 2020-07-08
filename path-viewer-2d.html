@@ -1,0 +1,78 @@
+<html>
+<head>
+<meta charset="utf-8">
+<title>Road Rash 64 Path Viewer</title>
+</head>
+<body>
+ROM: <input id="file" type="file"/><br>
+<canvas id="canvas" style="width: 1600px; height: 1600px; background-color: #000;" width="1600" height="1600"></canvas>
+<script>
+const raUnkFile = 0x000AA4C0;
+const raPathData = raUnkFile + 0x418;
+const NUM_POINTS = 3053;
+
+const width = 800;
+const height = 800;
+const scale = 0.05;
+
+var domCanvas = document.querySelector('#canvas');
+var ctx = domCanvas.getContext('2d');
+
+domCanvas.style.width = width + 'px';
+domCanvas.style.height = height + 'px';
+domCanvas.setAttribute('width', width);
+domCanvas.setAttribute('height', height);
+
+function loadRom(ab)
+{
+    var dvRom = new DataView(ab);
+
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, width, height);
+
+    for(var i = 0; i < NUM_POINTS; i++)
+    {
+        var offset = raPathData + i * 16;
+        var unk00 = dvRom.getUint8(offset + 0x00);
+        var unk04 = dvRom.getUint32(offset + 0x04);
+        var x = dvRom.getFloat32(offset + 0x08);
+        var z = dvRom.getFloat32(offset + 0x0C);
+
+        if(unk00 == 0x05) // dunno
+            continue;
+
+        switch(unk00)
+        {
+        case 1: ctx.fillStyle = '#F00'; break;
+        case 2: ctx.fillStyle = '#0F0'; break;
+        case 3: ctx.fillStyle = '#0FF'; break;
+        case 4: ctx.fillStyle = '#FF0'; break;
+        default: ctx.fillStyle = "#FFF"; break;
+        }
+
+        ctx.fillRect(Math.round(width/2 + -x*scale), Math.round(height/2 + z*scale), 1, 1);
+    }
+}
+
+function attachFileReader(query, onloadend)
+{
+    var domFileInput = document.querySelector(query);
+    var reader = new FileReader();
+    reader.onloadend = function()
+    {
+        onloadend(reader.result);
+    }
+
+    domFileInput.addEventListener('change', function()
+    {
+        reader.readAsArrayBuffer(domFileInput.files[0]);
+    });
+}
+
+attachFileReader('#file', function(ab)
+{
+    loadRom(ab);
+})
+</script>
+</body>
+</html>
