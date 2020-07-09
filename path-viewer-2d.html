@@ -254,13 +254,15 @@ function PinCollection(ctx)
 {
     this.ctx = ctx;
     this.pins = [];
+
+    var metrics = this.ctx.measureText("GgYy"); 
+    this.textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxAscent;
 }
 
 PinCollection.prototype.addPin = function(text, x, y, fgColor, bgColor)
 {
     var textMetrics = this.ctx.measureText(text);
     var textWidth = textMetrics.width;
-    var textHeight = textMetrics.actualBoundingBoxAscent + textMetrics.fontBoundingBoxDescent;
 
     var pin = {
         originX: x,
@@ -268,7 +270,7 @@ PinCollection.prototype.addPin = function(text, x, y, fgColor, bgColor)
         labelX0: x + 1,
         labelY0: y - 20,
         labelX1: x + textWidth + 4 + 1,
-        labelY1: y - 20 + textHeight + 4,
+        labelY1: y - 20 + this.textHeight,
         text: text,
         fgColor: fgColor,
         bgColor: bgColor,
