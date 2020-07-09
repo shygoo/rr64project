@@ -4,34 +4,29 @@
 <title>Road Rash 64 Path Viewer</title>
 <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
 <style>
-    label
-    {
-        user-select: none;
-    }
-    
-    body, input, button, label, select
-    {
-        font-family: "Open Sans";
-    }
-    
-    select
-    {
-        padding: 1px 6px;
-    }
-    </style>
+label
+{
+    user-select: none;
+}
+
+body, input, button, label, select
+{
+    font-family: "Open Sans";
+}
+
+select
+{
+    padding: 1px 6px;
+}
+</style>
+<script src="js/rr64.js"></script>
+<script src="js/util.js"></script>
 </head>
 <body>
 <div style="margin-bottom: 10px;">ROM: <input id="file" type="file"/></div>
 <div id="container"></div>
 
 <script>
-const raUnkFile = 0x000AA4C0;
-const raPathData = raUnkFile + 0x418;
-const NUM_POINTS = 3053;
-
-const raRaceTable = 0xB67C4;
-const NUM_RACES = 58;
-
 var viewer = new Viewer('#container');
 
 function Viewer(containerDomQuery)
@@ -71,9 +66,9 @@ Viewer.prototype.clearScreen = function()
 
 Viewer.prototype.drawPaths = function()
 {
-    for(var i = 0; i < NUM_POINTS; i++)
+    for(var i = 0; i < NUM_PATH_POINTS; i++)
     {
-        var offset = raPathData + i * 16;
+        var offset = RA_PATH_DATA + i * 16;
         var unk00 = this.dvRom.getUint8(offset + 0x00);
         var unk01 = this.dvRom.getUint8(offset + 0x01);
         var unk02 = this.dvRom.getUint8(offset + 0x02);
@@ -166,7 +161,7 @@ Viewer.prototype.initRacePins = function()
 
     for(var i = 0; i < NUM_RACES; i++)
     {
-        var offset = raRaceTable + (i * 0x4C);
+        var offset = RA_RACE_TABLE + (i * 0x4C);
         var raceName = dvgetstr(dv, offset);
         var startX = dv.getFloat32(offset + 0x34);
         var startZ = dv.getFloat32(offset + 0x38);
@@ -365,40 +360,15 @@ PinCollection.prototype.draw = function()
     }
 }
 
-function dvgetstr(dv, offset)
-{
-    var s = "";
-    for(var i = 0;; i++)
-    {
-        var c = dv.getUint8(offset + i);
-        if(c == 0)
-        {
-            break;
-        }
-        s += String.fromCharCode(c);
-    }
-    return s;
-}
-
-function attachFileReader(query, onloadend)
-{
-    var domFileInput = document.querySelector(query);
-    var reader = new FileReader();
-    reader.onloadend = function()
-    {
-        onloadend(reader.result);
-    }
-
-    domFileInput.addEventListener('change', function()
-    {
-        reader.readAsArrayBuffer(domFileInput.files[0]);
-    });
-}
-
 attachFileReader('#file', function(ab)
 {
     viewer.loadRom(ab);
-})
+});
+
+attachDropZone('body', function(ab)
+{
+    viewer.loadRom(ab);
+});
 </script>
 </body>
 </html>
