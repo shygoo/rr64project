@@ -1,0 +1,122 @@
+
+see table at 800DACD8 in RAM for locations
+
+------------------
+
+File structure
+
+  /*00*/ u32 signature   // (0x41)
+  /*04*/ u32 size        // size of this file
+  /*08*/ u32 unk08
+  /*0C*/ u32 unk0C
+  /*10*/ u8  unk10[0x30]  // always padding?
+  /*40*/ u32 unk40[2]     // unk40[0] = 0x18 (signature?), unk40[1] = offset of graph commands relative to 0x40
+  /*48*/ u8  unk48[0x18]  // looks like padding
+  /*4C*/ u32 numTextures  // number of texture references
+  /*50*/ u32 unk50
+  /*54*/ ref textureRefs[numTextures] // point to "0x16" textures ()
+  /*..*/ ... texture containers (0x16, 0x17?)
+  /*..*/ ... graph commands (0x13, 0x12, 0x11, 0x10)
+
+"Reference" structure
+
+  /*00*/ u32   offset // offset of the data, relative to this structure
+  /*04*/ u32   size   // size of referenced data 
+  /*08*/ void *data   // runtime linker will store the virtual address here 
+
+---------------------
+
+0x13 command:
+  /*00*/ u32 signature (0x13)
+  /*04*/ u32 size
+  /*08*/ u32 marker
+  /*0C*/ u16 numReferences
+  /*0E*/ u16 unk0E
+  /*10*/ u32 unk10
+  /*14*/ u32 unk14
+  /*18*/ u32 unk18
+  /*1C*/ u32 unk1C
+  /*20*/ u32 unk20
+  /*24*/ f32 unk24
+  /*28*/ u32 unk28
+  /*2C*/ u32 unk28
+  /*30*/ u32 unk28
+  /*34*/ u32 unk28
+  /*38*/ u32 unk28
+  /*3C*/ u32 unk28
+
+  /*40*/ ref references[numReferences] // point to "0x12" commands
+
+0x12 command:
+  /*00*/ u32 signature (0x12)
+  /*04*/ u32 size
+  /*08*/ u32 marker
+  /*0C*/ u32 unk0C // looks like padding
+  /*10*/ u16 numReferences
+  /*12*/ u16 unk12
+  /*14*/ u32 unk14
+  /*18*/ u32 unk18
+  /*1C*/ u32 unk1C
+  /*20*/ u16 unk20
+  /*22*/ u16 unk22
+  /*24*/ u32 unk24
+  /*28*/ u32 unk28
+  /*2C*/ u32 unk2C
+  /*30*/ u32 unk30
+  /*34*/ f32 unk34
+  /*38*/ u32 unk38
+  /*3C*/ u32 unk3C
+  /*40*/ u32 unk40
+  /*44*/ u32 unk44
+  /*48*/ f32 unk48
+  /*4C*/ f32 unk4C
+  /*50*/ f32 unk50
+  /*54*/ f32 unk54
+
+  /*58*/ ref references[numReferences] // point to "0x11" commands
+  /*..*/ u32 ... padding?
+
+0x11 command:
+  /*00*/ u32 signature (0x11)
+  /*04*/ u32 size
+  /*08*/ u32 marker
+  /*0C*/ u16 numReferences
+  /*0E*/ u16 unk0E
+  /*10*/ u32 unk10
+  /*14*/ u32 unk14
+  /*18*/ u32 unk18
+  /*1C*/ u32 unk1C
+  /*20*/ u32 unk20
+  /*24*/ u32 unk24
+  /*28*/ f32 unk28
+  /*2C*/ f32 unk2C
+  /*30*/ f32 unk30
+  /*34*/ f32 unk34
+
+  /*38*/ ref references[numReferences] // point to "0x10" commands
+  /*..*/ u32 ... padding?
+
+0x10 command:
+  /*00*/ u32 signature (0x10)
+  /*04*/ u32 size
+  /*08*/ u32 marker
+  /*0C*/ u16 numPackets
+  /*0E*/ u16 unk08
+  /*10*/ u16 unk10 (always 0x0005?)
+  /*12*/ u16 unk12 (always 0x0004?)
+  /*14*/ u32 unk14
+  /*18*/ f32 unk18
+  /*1C*/ f32 unk1C
+  /*20*/ f32 unk20
+  /*24*/ f32 unk24
+
+  /*28*/ ... geometry packets
+
+---------------------
+
+command parser function @ 8001AD24
+
+case 0x10 -> 8001AD78
+case 0x11 -> 8001AEB4
+case 0x12 -> 8001ADFC
+...
