@@ -226,6 +226,9 @@ Viewer.prototype.loadRom = function(abRom)
     this.abRom = abRom;
     this.dvRom = new DataView(abRom);
 
+    viewer.camera.position.set(-4660, 2088, 4565);
+    viewer.camera.rotation.set(-0.10247372413287152, -(Math.PI/2), 0);
+
     for(var modelIndex = 0; modelIndex < NUM_MODELS; modelIndex++)
     {
         var margin = 500;
@@ -234,19 +237,13 @@ Viewer.prototype.loadRom = function(abRom)
 
         try {
             viewer.addModel(modelIndex, x, 0, z);
-            var label = makeLabelObject("0x" + modelIndex.hex(3));
-            label.position.set(x, -20, z);
-            label.scale.set(10, 10, 10);
-            viewer.scene.add(label);
         }
         catch(e) {
             console.log("exception caught on model 0x" + modelIndex.hex(3))
-            //console.error(e)
+            console.error(e)
         }
     }
 }
-
-// model 257 crashes
 
 Viewer.prototype.addModel = function(modelIndex, x, y, z)
 {
@@ -279,7 +276,7 @@ Viewer.prototype.addModel = function(modelIndex, x, y, z)
 
 /***************************************/
 
-function RR64Model(dv)
+function RR64Model(dv, bDebug)
 {
     this.dv = dv;
     var header = new ModelHeader(dv, 0x00);
@@ -298,6 +295,7 @@ function RR64Model(dv)
         var signature = dv.getUint32(offsTextureFile + 0x00);
 
         var textureHeader = new TextureHeader(dv, offsTextureFile);
+
         //console.log(textureHeader.fileName);
         // todo handle 0x16/0x17 texture file
         // todo find where textures are indexed
@@ -341,7 +339,11 @@ RR64Model.prototype.processNode13 = function(offset)
 RR64Model.prototype.processNode12 = function(offset)
 {
     var node = new Node12(this.dv, offset);
-    var offsRefTable = offset + Node12.SIZE;
+
+    // todo what are these structs for (animation?)
+    var offsStructsA = offset + Node12.SIZE;
+    var offsStructsB = offsStructsA + (node.numUnkStructsA * 0x18);
+    var offsRefTable = offsStructsB + (node.numUnkStructsB * 0x10);
 
     //console.log('    ' + offset.hex(), 'node12', JSON.stringify(node));
 
@@ -349,7 +351,7 @@ RR64Model.prototype.processNode12 = function(offset)
     {
         var offsRef = offsRefTable + Reference.SIZE * i
         var reference = new Reference(this.dv, offsRef);
-        var offsCmd = offsRef + reference.offset;
+        var offsCmd = (offsRef + reference.offset) & 0xFFFF;
         this.processNode(offsCmd);
     }
     

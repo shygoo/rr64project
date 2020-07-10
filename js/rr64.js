@@ -171,9 +171,10 @@ function Node12(dv, offset)
     this.numReferences = dv.getUint16(offset + 0x10);
     this.unk12 = dv.getUint16(offset + 0x12);
     this.unk14 = dv.getUint32(offset + 0x14);
-    this.unk18 = dv.getUint32(offset + 0x18);
+    this.numUnkStructsA = dv.getUint16(offset + 0x18);
+    this.unk1A = dv.getUint16(offset + 0x18);
     this.unk1C = dv.getUint32(offset + 0x1C);
-    this.unk20 = dv.getUint16(offset + 0x20);
+    this.numUnkStructsB = dv.getUint16(offset + 0x20);
     this.unk22 = dv.getUint16(offset + 0x22);
     this.unk24 = dv.getUint32(offset + 0x24);
     this.unk28 = dv.getUint32(offset + 0x28);
