@@ -2,9 +2,13 @@
 // file system header: 0000003E 00DDF0C0 00000000 0001 1170 03E8 1324 039E 0346
 // entries 0x0000 through 0x0404 are texture files
 // entries 0x0405+ are mesh files
-
 const RA_FILE_TABLE = 0x0018D380; 
 const NUM_FILES = 0x16C2;
+
+// 0101D440: 00000040 00248800 00000001 00000175 // (175 = number of models)
+const RA_MODEL_TABLE_HEADER = 0x0101D440; 
+const RA_MODEL_TABLE = 0x0101D480;
+const NUM_MODELS = 0x175;
 
 const RA_UNK_FILE = 0x000AA4C0;
 const RA_PATH_DATA = RA_UNK_FILE + 0x418;
@@ -12,7 +16,6 @@ const NUM_PATH_POINTS = 3053;
 
 const RA_RACE_TABLE = 0x000B67C4;
 const NUM_RACES = 58;
-
 
 const SIG_TEXTURE      = 0x16;
 const SIG_ANIM_TEXTURE = 0x17;
@@ -50,6 +53,7 @@ function TextureHeader(dv, offset)
     this.signature = dv.getUint32(offset + 0x00); // 16 = single image, 17 = multiple images for animation
     this.textureFileSize = dv.getUint32(offset + 0x04);
     this.unk08 = dv.getUint32(offset + 0x08); // always FFFFFFFF
+    this.fileName = dvgetstr(dv, offset + 0x0C);
     this.numTextures = dv.getUint16(offset + 0x20); // usually 1, 2+ if animated
     this.paletteSize = dv.getUint16(offset + 0x22);
     this.unk24 = dv.getUint16(offset + 0x24);   // 0x4000 = need alpha?, 0x0014 = ?
@@ -107,3 +111,122 @@ function SubMeshPacketHeader(dv, offset)
 }
 
 SubMeshPacketHeader.SIZE = 8;
+
+////////////
+
+function ModelHeader(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // 0x41
+    this.size = dv.getUint32(offset + 0x04);
+    this.unk08 = dv.getUint32(offset + 0x08);
+    this.unk0C = dv.getUint32(offset + 0x0C);
+    // u8 unk10[0x30] padding?
+    this.unk40 = dv.getUint32(offset + 0x40);
+    this.offsCommands = dv.getUint32(offset + 0x44); // + 0x40 = offset of graph commands
+    // u8 unk48[0x18] padding?
+    this.numTextures = dv.getUint32(offset + 0x60);
+    this.unk64 = dv.getUint32(offset + 0x64);
+}
+
+ModelHeader.SIZE = 0x68;
+
+function Reference(dv, offset)
+{
+    this.offset = dv.getUint32(offset + 0x00);
+    this.size = dv.getUint32(offset + 0x04);
+    this.ptr = dv.getUint32(offset + 0x08);
+}
+
+Reference.SIZE = 0x0C;
+
+function Node13(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // 0x13
+    this.size = dv.getUint32(offset + 0x04);
+    this.marker = dv.getUint32(offset + 0x08);
+    this.numReferences = dv.getUint16(offset + 0x0C);
+    this.unk0E = dv.getUint16(offset + 0x0E);
+    this.unk10 = dv.getUint32(offset + 0x10);
+    this.unk14 = dv.getUint32(offset + 0x14);
+    this.unk18 = dv.getUint32(offset + 0x18);
+    this.unk1C = dv.getUint32(offset + 0x1C);
+    this.unk20 = dv.getUint32(offset + 0x20);
+    this.unk24 = dv.getFloat32(offset + 0x24);
+    this.unk28 = dv.getUint32(offset + 0x28);
+    this.unk2C = dv.getUint32(offset + 0x2C);
+    this.unk30 = dv.getUint32(offset + 0x30);
+    this.unk34 = dv.getUint32(offset + 0x34);
+    this.unk38 = dv.getUint32(offset + 0x38);
+    this.unk3C = dv.getUint32(offset + 0x3C);
+}
+
+Node13.SIZE = 0x40;
+
+function Node12(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // (0x12)
+    this.size = dv.getUint32(offset + 0x04);
+    this.marker = dv.getUint32(offset + 0x08);
+    this.unk0C = dv.getUint32(offset + 0x0C); // looks like padding
+    this.numReferences = dv.getUint16(offset + 0x10);
+    this.unk12 = dv.getUint16(offset + 0x12);
+    this.unk14 = dv.getUint32(offset + 0x14);
+    this.unk18 = dv.getUint32(offset + 0x18);
+    this.unk1C = dv.getUint32(offset + 0x1C);
+    this.unk20 = dv.getUint16(offset + 0x20);
+    this.unk22 = dv.getUint16(offset + 0x22);
+    this.unk24 = dv.getUint32(offset + 0x24);
+    this.unk28 = dv.getUint32(offset + 0x28);
+    this.unk2C = dv.getUint32(offset + 0x2C);
+    this.unk30 = dv.getUint32(offset + 0x30);
+    this.unk34 = dv.getFloat32(offset + 0x34);
+    this.unk38 = dv.getUint32(offset + 0x38);
+    this.unk3C = dv.getUint32(offset + 0x3C);
+    this.unk40 = dv.getUint32(offset + 0x40);
+    this.unk44 = dv.getUint32(offset + 0x44);
+    this.unk48 = dv.getFloat32(offset + 0x48);
+    this.unk4C = dv.getFloat32(offset + 0x4C);
+    this.unk50 = dv.getFloat32(offset + 0x50);
+    this.unk54 = dv.getFloat32(offset + 0x54);
+}
+
+Node12.SIZE = 0x58;
+
+function Node11(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // (0x11)
+    this.size = dv.getUint32(offset + 0x04);
+    this.marker = dv.getUint32(offset + 0x08);
+    this.numReferences = dv.getUint16(offset + 0x0C);
+    this.unk0E = dv.getUint16(offset + 0x0E);
+    this.unk10 = dv.getUint32(offset + 0x10);
+    this.unk14 = dv.getUint32(offset + 0x14);
+    this.unk18 = dv.getUint32(offset + 0x18);
+    this.unk1C = dv.getUint32(offset + 0x1C);
+    this.unk20 = dv.getUint32(offset + 0x20);
+    this.unk24 = dv.getUint32(offset + 0x24);
+    this.unk28 = dv.getFloat32(offset + 0x28);
+    this.unk2C = dv.getFloat32(offset + 0x2C);
+    this.unk30 = dv.getFloat32(offset + 0x30);
+    this.unk34 = dv.getFloat32(offset + 0x34);
+}
+
+Node11.SIZE = 0x38;
+
+function Node10(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // (0x10)
+    this.size = dv.getUint32(offset + 0x04);
+    this.marker = dv.getUint32(offset + 0x08);
+    this.numPackets = dv.getUint16(offset + 0x0C);
+    this.unk08 = dv.getUint16(offset + 0x0E);
+    this.unk10 = dv.getUint16(offset + 0x10); // (always 0x0005?)
+    this.unk12 = dv.getUint16(offset + 0x12); // (always 0x0004?)
+    this.unk14 = dv.getUint32(offset + 0x14);
+    this.unk18 = dv.getFloat32(offset + 0x18);
+    this.unk1C = dv.getFloat32(offset + 0x1C);
+    this.unk20 = dv.getFloat32(offset + 0x20);
+    this.unk24 = dv.getFloat32(offset + 0x24);
+}
+
+Node10.SIZE = 0x28;

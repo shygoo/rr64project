@@ -1,0 +1,437 @@
+<html>
+<head>
+<meta charset="utf-8">
+<title>Road Rash 64 Model Viewer</title>
+<link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+<style>
+label
+{
+    user-select: none;
+}
+
+body, input, button, label, select
+{
+    font-family: "Open Sans";
+}
+
+select
+{
+    padding: 1px 6px;
+}
+</style>
+<script src="js/three.js"></script>
+<script src="js/rr64.js"></script>
+<script src="js/texture.js"></script>
+<script src="js/util.js"></script>
+</head>
+<body style="background: #111; color: #FFF;">
+<div style="text-align: center;">
+    <div style="display: inline-block; margin: auto auto; text-align: left;">
+            <div style="padding-bottom: 10px; text-align: left;">ROM: <input type="file" id="file"></div>
+        <div id="container"></div>
+    </div>
+</div>
+<script>
+
+function Viewer(queryDomContainer)
+{
+    var _this = this;
+    this.scene = new THREE.Scene();
+    this.renderer = new THREE.WebGLRenderer({antialias: false});
+
+    this.objects = {
+        'main_mesh': { label: "Main mesh", visible: true, objects: [] }
+    }
+
+    this.initDOM(queryDomContainer);
+
+    this.dvRom = null;
+    this.dvGfx = null;
+    this.dvTransforms = null;
+
+    this.keysDown = {};
+
+    this.camSpeedZ = 0;
+    this.camSpeedX = 0;
+    this.camSpeedY = 0;
+
+    this.camRotSpeedX = 0;
+    this.camRotSpeedY = 0;
+
+    this.width = 1280;
+    this.height = 720;
+
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(this.width, this.height);
+    this.renderer.setScissorTest(true);
+    this.renderer.alpha = true;
+    this.renderer.setClearColor(0x555555, 1.0);
+    this.renderer.setViewport(0, 0, this.width, this.height);
+    this.renderer.setScissor(0, 0, this.width, this.height);
+
+    this.renderer.setClearColor(0x7B8CCE, 1.0);
+    this.scene.fog = new THREE.Fog(0x7B8CCE, 1, 65535);
+
+    this.camera = new THREE.PerspectiveCamera(60, this.width/this.height, 1, 65535);
+    this.camera.rotation.order = "YXZ";
+
+    this.camera.translateZ(500);
+
+    this.dom['render'].tabIndex = '0'
+    this.dom['render'].style.display = "inline-block";
+
+    this.dom['render'].onkeydown = function(e)
+    {
+        _this.keysDown[e.keyCode] = true;
+    	e.preventDefault();
+    	return false;
+    }
+
+    this.dom['render'].onkeyup = function(e)
+    {
+    	delete _this.keysDown[e.keyCode];
+    	e.preventDefault();
+    	return false;
+    }
+
+    this.dom['render'].oncontextmenu = function(e)
+    {
+        e.preventDefault();
+        return false;
+    }
+
+    this.dom['render'].onmousedown = function(e)
+    {
+        this.requestPointerLock();
+        this.focus();
+        e.preventDefault();
+        return false;
+    }
+
+    var lastMovementX = 0;
+    var lastMovementY = 0;
+
+    this.dom['render'].onmousemove = function(e)
+    {
+        if(e.buttons == 0)
+        {
+            return;
+        }
+
+        var movementX = e.movementX / 4;
+        var movementY = e.movementY / 4;
+
+        if(e.buttons == 1)
+        {
+            viewer.camera.translateX(-movementX * 5);
+            viewer.camera.translateY(movementY * 5);
+        }
+
+        if(e.buttons == 4)
+        {
+            viewer.camera.translateZ(-movementX * 5);
+            viewer.camera.translateZ(movementY * 5);
+        }
+
+        if(e.buttons == 2)
+        {
+            viewer.camera.rotateY(-movementX * 0.01);
+            viewer.camera.rotateX(-movementY * 0.01);
+            viewer.camera.rotation.z = 0;
+        }
+    }
+
+    this.dom['render'].onmouseup = function(e)
+    {
+        lastMovementX = 0;
+        lastMovementY = 0;
+        document.exitPointerLock();
+    }
+
+    const CAM_MV_SPD = 30;
+
+    this.keyEvents = {
+	    //27: function(){ _this.resetCamera() }, // esc - reset camera position
+	    87: function(viewer){ viewer.camSpeedZ = -CAM_MV_SPD; }, // w - move forward
+	    65: function(viewer){ viewer.camSpeedX = -CAM_MV_SPD; }, // a - pan left
+	    83: function(viewer){ viewer.camSpeedZ = CAM_MV_SPD; }, // s - move backward
+	    68: function(viewer){ viewer.camSpeedX = CAM_MV_SPD; }, // d - pan right
+	    90: function(viewer){ viewer.camSpeedY = -CAM_MV_SPD; }, // z - move down
+	    88: function(viewer){ viewer.camSpeedY = CAM_MV_SPD; }, // x - move up
+	    40: function(viewer){ viewer.camRotSpeedX = -20; }, // down - rotate down
+	    38: function(viewer){ viewer.camRotSpeedX =  20; }, // up - rotate up
+	    37: function(viewer){ viewer.camRotSpeedY =  20;;}, // left - rotate left
+	    39: function(viewer){ viewer.camRotSpeedY = -20;}  // right - rotate right
+    }
+}
+
+Viewer.prototype.initDOM = function(queryDomContainer)
+{
+    var _this = this;
+
+    var dom = {
+        'container': document.querySelector(queryDomContainer),
+        'toolbarPane': document.createElement('div'),
+        'mainPane': document.createElement('div'),
+        'togglePane': document.createElement('div'),
+        'render': this.renderer.domElement
+    };
+
+    dom['container'].appendChild(dom['toolbarPane']);
+    dom['container'].appendChild(dom['mainPane']);
+    dom['mainPane'].appendChild(dom['render']);
+    dom['mainPane'].appendChild(dom['togglePane']);
+
+    dom['container'].style = "background-color: #222; padding: 20px;";
+    dom['toolbarPane'].style = "padding-top: 10px; padding-bottom: 10px;";
+    dom['togglePane'].style = "padding-left: 10px; display: inline-block; vertical-align: top;";
+
+    this.dom = dom;
+}
+
+Viewer.prototype.animate = function()
+{
+    viewer.camera.translateZ(this.camSpeedZ);
+    viewer.camera.translateX(this.camSpeedX);
+    viewer.camera.translateY(this.camSpeedY);
+
+    viewer.camera.rotateX(this.camRotSpeedX / 1000);
+    viewer.camera.rotateY(this.camRotSpeedY / 1000);
+    viewer.camera.rotation.z = 0;
+
+    if(this.camSpeedZ < 0) this.camSpeedZ += 5;
+    if(this.camSpeedZ > 0) this.camSpeedZ -= 5;
+    if(this.camSpeedX > 0) this.camSpeedX -= 5;
+    if(this.camSpeedX < 0) this.camSpeedX += 5;
+    if(this.camSpeedY > 0) this.camSpeedY -= 5;
+    if(this.camSpeedY < 0) this.camSpeedY += 5;
+    if(this.camRotSpeedX > 0) this.camRotSpeedX -= 1;
+    if(this.camRotSpeedX < 0) this.camRotSpeedX += 1;
+    if(this.camRotSpeedY > 0) this.camRotSpeedY -= 1;
+    if(this.camRotSpeedY < 0) this.camRotSpeedY += 1;
+
+    for(var k in this.keysDown)
+    {
+        if(k in this.keyEvents) this.keyEvents[k](this);
+    }
+
+    this.renderer.render(this.scene, this.camera);
+    //console.log(this.renderer.info.render.calls);
+
+    requestAnimationFrame(this.animate.bind(this));
+}
+
+Viewer.prototype.loadRom = function(abRom)
+{
+    this.abRom = abRom;
+    this.dvRom = new DataView(abRom);
+
+    for(var modelIndex = 0; modelIndex < NUM_MODELS; modelIndex++)
+    {
+        var margin = 500;
+        var x = (modelIndex % 20) * margin;
+        var z = ((modelIndex / 20) | 0) * margin;
+
+        try {
+            viewer.addModel(modelIndex, x, 0, z);
+            var label = makeLabelObject("0x" + modelIndex.hex(3));
+            label.position.set(x, -20, z);
+            label.scale.set(10, 10, 10);
+            viewer.scene.add(label);
+        }
+        catch(e) {
+            console.log("exception caught on model 0x" + modelIndex.hex(3))
+            //console.error(e)
+        }
+    }
+}
+
+// model 257 crashes
+
+Viewer.prototype.addModel = function(modelIndex, x, y, z)
+{
+    var offsRef = RA_MODEL_TABLE + modelIndex * Reference.SIZE;
+    var modelReference = new Reference(this.dvRom, offsRef);
+    var raModelFile = offsRef + modelReference.offset;
+
+    if(modelIndex >= NUM_MODELS || modelIndex < 0)
+    {
+        return;
+    }
+
+    var dvModelFile = dvpart(this.dvRom, raModelFile, modelReference.size);
+    var model = new RR64Model(dvModelFile);
+    
+    var geometry = new THREE.BufferGeometry();
+
+    var fPositions = new Float32Array(model.positions);
+    var fColors = new Float32Array(model.colors);
+    
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(fPositions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(fColors, 3));
+    geometry.setIndex(model.indices);
+
+    var material = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors, side: THREE.DoubleSide });
+    var mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    this.scene.add(mesh);
+}
+
+/***************************************/
+
+function RR64Model(dv)
+{
+    this.dv = dv;
+    var header = new ModelHeader(dv, 0x00);
+
+    this.positions = [];
+    this.colors = [];
+    this.uvs = [];
+    this.indices = [];
+
+    // collect textures
+    for(var i = 0; i < header.numTextures; i++)
+    {
+        var offsRef = ModelHeader.SIZE + (i * Reference.SIZE);
+        var reference = new Reference(dv, offsRef);
+        var offsTextureFile = offsRef + reference.offset;
+        var signature = dv.getUint32(offsTextureFile + 0x00);
+
+        var textureHeader = new TextureHeader(dv, offsTextureFile);
+        //console.log(textureHeader.fileName);
+        // todo handle 0x16/0x17 texture file
+        // todo find where textures are indexed
+    }
+
+    var offset = 0x40 + header.offsCommands;
+    this.processNode(offset);
+}
+
+RR64Model.prototype.processNode = function(offset)
+{
+    var cmdSig = this.dv.getUint32(offset);
+
+    switch(cmdSig)
+    {
+    case 0x13: this.processNode13(offset); break;
+    case 0x12: this.processNode12(offset); break;
+    case 0x11: this.processNode11(offset); break;
+    case 0x10: this.processNode10(offset); break;
+    default: throw new Error('shit');
+    }
+}
+
+RR64Model.prototype.processNode13 = function(offset)
+{
+    var node = new Node13(this.dv, offset);
+    var offsRefTable = offset + Node13.SIZE;
+
+    //console.log(offset.hex(), 'node13', JSON.stringify(node));
+
+    for(var i = 0; i < node.numReferences; i++)
+    {
+        var offsRef = offsRefTable + Reference.SIZE * i;
+        var reference = new Reference(this.dv, offsRef);
+
+        var offsCmd = offsRef + reference.offset;
+        this.processNode(offsCmd);
+    }
+}
+
+RR64Model.prototype.processNode12 = function(offset)
+{
+    var node = new Node12(this.dv, offset);
+    var offsRefTable = offset + Node12.SIZE;
+
+    //console.log('    ' + offset.hex(), 'node12', JSON.stringify(node));
+
+    for(var i = 0; i < node.numReferences; i++)
+    {
+        var offsRef = offsRefTable + Reference.SIZE * i
+        var reference = new Reference(this.dv, offsRef);
+        var offsCmd = offsRef + reference.offset;
+        this.processNode(offsCmd);
+    }
+    
+}
+
+RR64Model.prototype.processNode11 = function(offset)
+{
+    var node = new Node11(this.dv, offset);
+    var offsRefTable = offset + Node11.SIZE;
+
+    //console.log('        ' + offset.hex(), 'node11', JSON.stringify(node));
+
+    for(var i = 0; i < node.numReferences; i++)
+    {
+        var offsRef = offsRefTable + Reference.SIZE * i
+        var reference = new Reference(this.dv, offsRef);
+        
+        var offsCmd = offsRef + reference.offset;
+        this.processNode(offsCmd);
+    }
+}
+
+RR64Model.prototype.processNode10 = function(offset)
+{
+    var node = new Node10(this.dv, offset);
+
+    //console.log('            ' + offset.hex(), 'node10', JSON.stringify(node));
+
+    var packetOffset = offset + Node10.SIZE;
+    var dv = this.dv;
+
+    // todo clean up code reuse
+    for(var nPacket = 0; nPacket < node.numPackets; nPacket++)
+    {
+        var indexBase = this.positions.length / 3;
+        var packetHeader = new SubMeshPacketHeader(dv, packetOffset);
+
+        //console.log('                ' + packetOffset.hex(), packetHeader);
+
+        var verticesOffset = packetOffset + SubMeshPacketHeader.SIZE;
+        var trianglesOffset = verticesOffset + packetHeader.verticesSize;
+
+        for(var nVertex = 0; nVertex < packetHeader.numVertices; nVertex++)
+        {
+            var offsVertex = verticesOffset + (nVertex * 16);
+            var vertex = new SPVertex(dv, offsVertex);
+            this.positions.push(-(vertex.x), vertex.z, vertex.y);
+            this.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
+            //this.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
+        }
+
+        for(var nTri = 0; nTri < packetHeader.numTriangles; nTri++)
+        {
+            var offsTri = trianglesOffset + (nTri * 2);
+            var tri = dv.getUint16(offsTri);
+            var v0 = (tri >> 10) & 0x1F;
+            var v1 = (tri >>  5) & 0x1F;
+            var v2 = (tri >>  0) & 0x1F;
+            this.indices.push(indexBase + v0, indexBase + v1, indexBase + v2);
+            //console.log(indexBase, v0, v1, v2);
+        }
+
+        packetOffset += packetHeader.packetSize;
+    }
+}
+
+/***************************************/
+
+var model = null;
+var viewer = new Viewer('#container');
+viewer.animate();
+
+attachDropZone('body', function(ab)
+{
+    viewer.loadRom(ab);
+});
+
+attachFileReader('#file', function(ab)
+{
+    viewer.loadRom(ab);
+});
+
+</script>
+</body>
+</html>
