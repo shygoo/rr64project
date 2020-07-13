@@ -18,21 +18,43 @@ select
 {
     padding: 1px 6px;
 }
+
+body, html {
+    height: 100%;
+    background: #222;
+    color: #FFF;
+    margin: 0px;
+}
 </style>
 <script src="js/three.js"></script>
 <script src="js/rr64.js"></script>
+<script src="js/rr64-model.js"></script>
 <script src="js/texture.js"></script>
 <script src="js/util.js"></script>
 </head>
-<body style="background: #111; color: #FFF;">
-<div style="text-align: center;">
-    <div style="display: inline-block; margin: auto auto; text-align: left;">
-            <div style="padding-bottom: 10px; text-align: left;">ROM: <input type="file" id="file"></div>
-        <div id="container"></div>
+<body>
+<div id="info" style="text-align: center; width: 100%; height: 100%; display: flex; flex-direction: column;">
+    <div style="flex: 1;"></div>
+    <div id="info-text" style="display: inline-block; padding: 10px; text-align: left; margin: auto; flex: 1; flex-grow: 0;">
+        <div style="padding: 10px; font-size: 24px;">Road Rash 64 Map Viewer</div>
+        <div style="padding: 10px;">Drag and drop a Road Rash 64 (U).z64 ROM onto<br>this page or click the choose file button below.</div>
+        <div style="padding: 10px;"><input type="file" id="file"></div>
+        <div style="padding: 10px;">
+            Controls:
+            <ul>
+                <li>WASD - Move camera</li>
+                <li>XZ - Move camera up/down</li>
+                <li>L-Mouse - Pan camera</li>
+                <li>R-Mouse - Rotate camera</li>
+            </ul>
+        </div>
     </div>
+    <div style="flex:1;"></div>
 </div>
-
+<div id="container"></div>
 <script>
+
+var viewer = null;
 
 function Viewer(queryDomContainer)
 {
@@ -59,14 +81,16 @@ function Viewer(queryDomContainer)
     this.camRotSpeedX = 0;
     this.camRotSpeedY = 0;
 
-    this.width = 1280;
-    this.height = 720;
+    this.dom['render'].tabIndex = '0'
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
 
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(this.width, this.height);
+    
     this.renderer.setScissorTest(true);
     this.renderer.alpha = true;
     this.renderer.setClearColor(0x555555, 1.0);
+    this.renderer.setSize(this.width, this.height);
     this.renderer.setViewport(0, 0, this.width, this.height);
     this.renderer.setScissor(0, 0, this.width, this.height);
 
@@ -78,11 +102,13 @@ function Viewer(queryDomContainer)
 
     this.camera.translateY(4000);
 
-    this.dom['render'].tabIndex = '0'
-    this.dom['render'].style.display = "inline-block";
-
     this.dom['render'].onkeydown = function(e)
     {
+        if(!_this.keyEvents[e.keyCode])
+        {
+            return;
+        }
+
         _this.keysDown[e.keyCode] = true;
     	e.preventDefault();
     	return false;
@@ -149,6 +175,22 @@ function Viewer(queryDomContainer)
         document.exitPointerLock();
     }
 
+    window.addEventListener('resize', function(e)
+    {
+        if(!_this.dvRom)
+        {
+            return;
+        }
+
+        _this.width = window.innerWidth;
+        _this.height = window.innerHeight;
+        _this.camera.aspect = (_this.width / _this.height);
+        _this.camera.updateProjectionMatrix();
+        _this.renderer.setSize(_this.width, _this.height);
+        _this.renderer.setViewport(0, 0, _this.width, _this.height);
+        _this.renderer.setScissor(0, 0, _this.width, _this.height);
+    });
+
     const CAM_MV_SPD = 30;
 
     this.keyEvents = {
@@ -172,21 +214,10 @@ Viewer.prototype.initDOM = function(queryDomContainer)
 
     var dom = {
         'container': document.querySelector(queryDomContainer),
-        'toolbarPane': document.createElement('div'),
-        'mainPane': document.createElement('div'),
-        'togglePane': document.createElement('div'),
         'render': this.renderer.domElement
     };
 
-    dom['container'].appendChild(dom['toolbarPane']);
-    dom['container'].appendChild(dom['mainPane']);
-    dom['mainPane'].appendChild(dom['render']);
-    dom['mainPane'].appendChild(dom['togglePane']);
-
-    dom['container'].style = "background-color: #222; padding: 20px;";
-    dom['toolbarPane'].style = "padding-top: 10px; padding-bottom: 10px;";
-    dom['togglePane'].style = "padding-left: 10px; display: inline-block; vertical-align: top;";
-
+    dom['container'].appendChild(dom['render']);
     this.dom = dom;
 }
 
@@ -233,7 +264,7 @@ Viewer.prototype.sceneAdd = function(tag, objectArray)
     this.objects[tag].objects.push(objectArray);
 }
 
-Viewer.prototype.loadMap = function(mapNum)
+Viewer.prototype.loadMap = function()
 {
     while(this.scene.children.length > 0)
     {
@@ -365,9 +396,101 @@ Viewer.prototype.loadMap = function(mapNum)
     var mesh = new THREE.Mesh(geometry, this.materials);
     this.scene.add(mesh);
 
+    this.addAllItems();
+    this.addAllSolidObjects();
+
     //var wfMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, wireframe: true, transparent: true, opacity: 0.01 });
     //var wfMesh = new THREE.Mesh(geometry, wfMaterial);
     //this.scene.add(wfMesh);
+}
+
+Viewer.prototype.addAllItems = function()
+{
+    var numItems = this.dvRom.getUint32(RA_ITEM_COUNT);
+    var geometry = new THREE.BufferGeometry();
+    var material = new THREE.PointsMaterial({ color: 0xFF0000, size: 20 });
+
+    var positions = [];
+
+    for(var nItem = 0; nItem < numItems; nItem++)
+    {
+        var raItem = RA_ITEM_TABLE + nItem * Item.SIZE;
+        var item = new Item(this.dvRom, raItem);
+        positions.push(-item.x * 4, item.z * 4, item.y * 4)
+    }
+
+    var fPositions = new Float32Array(positions);
+    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+    var points = new THREE.Points(geometry, material);
+    this.scene.add(points);
+}
+
+Viewer.prototype.getModelIndex = function(modelId_hi, modelId_lo)
+{
+    var indexBase = 0;
+    for(var i = 0; i < modelId_hi; i++)
+    {
+        indexBase += this.dvRom.getUint32(RA_MODEL_CATEGORY_INDICES + i * 4);
+    }
+
+    return indexBase + modelId_lo;
+}
+
+Viewer.prototype.addAllSolidObjects = function()
+{
+    var modelInstances = {};
+
+    for(var nFile = 0; nFile < NUM_PLACEMENT_FILES; nFile++)
+    {
+        var entryOffset = nFile * 4;
+        var offset = this.dvRom.getUint32(RA_OBJECT_PLACEMENT_TABLE + entryOffset);
+
+        if(offset == 0)
+        {
+            continue;
+        }
+
+        var raFile = RA_OBJECT_PLACEMENT_TABLE + entryOffset + offset;
+        var numPlacements = this.dvRom.getUint32(raFile);
+
+        for(var nPlacement = 0; nPlacement < numPlacements; nPlacement++)
+        {
+            var raPlacement = raFile + 0x88 + nPlacement * ObjectPlacement.SIZE;
+            var placement = new ObjectPlacement(this.dvRom, raPlacement);
+            var objectDef = new ObjectDefinition(this.dvRom, RA_OBJECT_DEFINITION_TABLE + placement.objectIndex * ObjectDefinition.SIZE);
+
+            var modelIndex = this.getModelIndex(objectDef.modelId_hi, objectDef.modelId_lo);
+
+            if(!modelInstances[modelIndex])
+            {
+                modelInstances[modelIndex] = [];
+            }
+
+            modelInstances[modelIndex].push(placement);
+        }
+    }
+
+    for(modelIndex in modelInstances)
+    {
+        //var count = modelInstances[modelIndex].length;
+        var placements = modelInstances[modelIndex];
+
+        var instancedMesh = this.createInstancedModel(modelIndex, placements.length);
+
+        for(var i = 0; i < placements.length; i++)
+        {
+            var p = placements[i];
+            var position = new THREE.Vector3(-p.posX * 4, p.posZ * 4, p.posY * 4);
+            var quaternion = new THREE.Quaternion(p.qX, p.qZ, p.qY, p.qW);
+            var scale = new THREE.Vector3(0.5, 0.5, 0.5);
+            var matrix = new THREE.Matrix4();
+            matrix.compose(position, quaternion, scale);
+
+            instancedMesh.setMatrixAt(i, matrix);
+        }
+
+        this.scene.add(instancedMesh);
+    }
 }
 
 Viewer.prototype.loadTexture = function(dvTexture)
@@ -466,47 +589,61 @@ Viewer.prototype.addSubMesh = function(dv, worldX, worldY, worldZ)
     }
 }
 
+Viewer.prototype.createInstancedModel = function(modelIndex, count)
+{
+    var offsRef = RA_MODEL_TABLE + modelIndex * Reference.SIZE;
+    var modelReference = new Reference(this.dvRom, offsRef);
+    var raModelFile = offsRef + modelReference.offset;
+
+    if(modelIndex >= NUM_MODELS || modelIndex < 0)
+    {
+        return;
+    }
+
+    var dvModelFile = dvpart(this.dvRom, raModelFile, modelReference.size);
+    var model = new RR64Model(dvModelFile);
+    
+    var geometry = new THREE.BufferGeometry();
+
+    var fPositions = new Float32Array(model.positions);
+    var fColors = new Float32Array(model.colors);
+    
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(fPositions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(fColors, 3));
+    geometry.setIndex(model.indices);
+
+    var material = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors, side: THREE.DoubleSide });
+    var mesh = new THREE.InstancedMesh(geometry, material, count);
+
+    return mesh;
+}
+
 Viewer.prototype.loadRom = function(abRom)
 {
     this.abRom = abRom;
     this.dvRom = new DataView(abRom);
 
-    this.loadMap(0);
+    this.loadMap();
 }
-
-var viewer = new Viewer('#container');
-viewer.animate();
 
 //////////////////////////////////////////////////
 
-attachFileReader('#file', function(ab)
+function onromloaded(ab)
 {
+    document.querySelector('#info').style.display = "none";
+    viewer = new Viewer('#container');
+    viewer.animate();
     viewer.loadRom(ab);
-})
+}
 
-attachDropZone('body', function(ab)
+function onromloading()
 {
-    viewer.loadRom(ab);
-})
+    document.querySelector('#info-text').innerHTML = "Loading...";
+}
 
-//document.body.ondragenter = function(e){e.preventDefault();}
-//document.body.ondragover = function(e){e.preventDefault();}
-//
-//document.body.ondrop = function(e)
-//{
-//    e.preventDefault();
-//
-//    if(e.dataTransfer.files)
-//    {
-//        var file = e.dataTransfer.files[0];
-//        var reader = new FileReader();
-//        reader.onloadend = function()
-//        {
-//            viewer.loadRom(reader.result);
-//        }
-//        reader.readAsArrayBuffer(file);
-//    }
-//}
+attachFileReader('#file', onromloaded, onromloading)
+attachDropZone('body', onromloaded, onromloading);
+
 </script>
 </body>
 </html>

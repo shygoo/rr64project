@@ -31,7 +31,7 @@ function dvgetstr(dv, offset)
     return s;
 }
 
-function attachFileReader(query, onloadend)
+function attachFileReader(query, onloadend, onloading)
 {
     var domFileInput = document.querySelector(query);
     var reader = new FileReader();
@@ -42,11 +42,12 @@ function attachFileReader(query, onloadend)
 
     domFileInput.addEventListener('change', function()
     {
+        onloading();
         reader.readAsArrayBuffer(domFileInput.files[0]);
     });
 }
 
-function attachDropZone(query, onloadend)
+function attachDropZone(query, onloadend, onloading)
 {
     var domDropZone = document.querySelector(query);
     
@@ -79,6 +80,8 @@ function attachDropZone(query, onloadend)
 
         if(e.dataTransfer.files)
         {
+            
+
             var file = e.dataTransfer.files[0];
             var reader = new FileReader();
 
@@ -86,7 +89,13 @@ function attachDropZone(query, onloadend)
             {
                 onloadend(reader.result);
             }
-            reader.readAsArrayBuffer(file);
+
+            try {
+                reader.readAsArrayBuffer(file);
+                onloading();
+            }
+            catch(e) {
+            }
         }
     });
 }

@@ -2,6 +2,13 @@
 // file system header: 0000003E 00DDF0C0 00000000 0001 1170 03E8 1324 039E 0346
 // entries 0x0000 through 0x0404 are texture files
 // entries 0x0405+ are mesh files
+
+const RA_MODEL_CATEGORY_INDICES = 0x000A8334;
+
+const RA_UNK_FILE = 0x000AA4C0;
+const RA_PATH_DATA = RA_UNK_FILE + 0x418;
+const NUM_PATH_POINTS = 3053;
+
 const RA_FILE_TABLE = 0x0018D380; 
 const NUM_FILES = 0x16C2;
 
@@ -10,9 +17,13 @@ const RA_MODEL_TABLE_HEADER = 0x0101D440;
 const RA_MODEL_TABLE = 0x0101D480;
 const NUM_MODELS = 0x175;
 
-const RA_UNK_FILE = 0x000AA4C0;
-const RA_PATH_DATA = RA_UNK_FILE + 0x418;
-const NUM_PATH_POINTS = 3053;
+const RA_OBJECT_PLACEMENT_TABLE = 0x01265C50;
+const NUM_PLACEMENT_FILES = 4900; // is this correct?
+
+const RA_OBJECT_DEFINITION_TABLE = 0x01303208;
+
+const RA_ITEM_COUNT = 0x01304DC0;
+const RA_ITEM_TABLE = 0x01304DC4;
 
 const RA_RACE_TABLE = 0x000B67C4;
 const NUM_RACES = 58;
@@ -231,3 +242,51 @@ function Node10(dv, offset)
 }
 
 Node10.SIZE = 0x28;
+
+//////////////////
+
+function Item(dv, offset)
+{
+    this.x = dv.getFloat32(offset + 0x00);
+    this.y = dv.getFloat32(offset + 0x04);
+    this.z = dv.getFloat32(offset + 0x08);
+    this.id = dv.getFloat32(offset + 0x0C); // not sure why this is a float
+}
+
+Item.SIZE = 0x10;
+
+//////////////////
+
+function ObjectPlacement(dv, offset)
+{
+    this.qX = dv.getFloat32(offset + 0x00); // q.x
+    this.qY = dv.getFloat32(offset + 0x04); // q.y
+    this.qZ = dv.getFloat32(offset + 0x08); // q.z
+    this.qW = dv.getFloat32(offset + 0x0C); // q.w
+
+    this.posX = dv.getFloat32(offset + 0x10);
+    this.posY = dv.getFloat32(offset + 0x14);
+    this.posZ = dv.getFloat32(offset + 0x18);
+    this.unk1C = dv.getFloat32(offset + 0x1C);
+    this.unk20 = dv.getFloat32(offset + 0x20);
+    this.unk24 = dv.getUint32(offset + 0x24);
+    this.objectIndex = dv.getUint16(offset + 0x28); // index of object definition table
+    this.unk2A = dv.getUint16(offset + 0x2A);
+    this.unk2C = dv.getUint32(offset + 0x2C);
+}
+
+ObjectPlacement.SIZE = 0x30;
+
+function ObjectDefinition(dv, offset)
+{
+    // ...
+    this.modelId_lo = dv.getUint8(offset + 0x03); // index of modelCategoryIndices
+    this.modelId_hi = dv.getUint8(offset + 0x04);
+    // ...
+    this.collisionRadius = dv.getInt16(offset + 0x0E);
+    // ...
+
+    // modelIndex = modelCategoryInices[modelId_hi] + modelId_lo
+}
+
+ObjectDefinition.SIZE = 0x18;
