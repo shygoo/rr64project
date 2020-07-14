@@ -46,6 +46,7 @@ body, html {
                 <li>XZ - Move camera up/down</li>
                 <li>L-Mouse - Pan camera</li>
                 <li>R-Mouse - Rotate camera</li>
+                <li>Mouse wheel - Adjust camera speed</li>
             </ul>
         </div>
     </div>
@@ -62,11 +63,18 @@ function Viewer(queryDomContainer)
     this.scene = new THREE.Scene();
     this.renderer = new THREE.WebGLRenderer({antialias: false});
 
-    this.objects = {
-        'main_mesh': { label: "Main mesh", visible: true, objects: [] }
-    }
+    this.layers = {};
 
-    this.initDOM(queryDomContainer);
+    this.hud = new ViewerHUD();
+
+    this.dom = {};
+    this.dom['render'] = this.renderer.domElement;
+    this.dom['render'].style.imageRendering = "pixelated";
+    this.dom['render'].tabIndex = '0';
+
+    this.dom['container'] = document.querySelector(queryDomContainer);
+    this.dom['container'].appendChild(this.hud.domElement);
+    this.dom['container'].appendChild(this.renderer.domElement);
 
     this.dvRom = null;
     this.dvGfx = null;
@@ -74,32 +82,40 @@ function Viewer(queryDomContainer)
 
     this.keysDown = {};
 
-    this.camSpeedZ = 0;
-    this.camSpeedX = 0;
-    this.camSpeedY = 0;
+    this.cameraSpeed = 30;
+    this.camStepX = 0;
+    this.camStepY = 0;
+    this.camStepZ = 0;
+    this.camRotStepX = 0;
+    this.camRotStepY = 0;
+    this.cameraNear = 1;
+    this.cameraFar = 65535;
 
-    this.camRotSpeedX = 0;
-    this.camRotSpeedY = 0;
+    this.fogNear = 1;
+    this.fogFar = 5000;
 
-    this.dom['render'].tabIndex = '0'
+    const clearColor = 0x7B8CCE;
+    const cameraDefaultPos = new THREE.Vector3(0, 4000, 0);
+
     this.width = window.innerWidth;
     this.height = window.innerHeight;
 
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    
-    this.renderer.setScissorTest(true);
-    this.renderer.alpha = true;
     this.renderer.setSize(this.width, this.height);
     this.renderer.setViewport(0, 0, this.width, this.height);
+    this.renderer.setScissorTest(true);
     this.renderer.setScissor(0, 0, this.width, this.height);
+    this.renderer.setClearColor(clearColor, 1.0);
+    this.renderer.alpha = true;
 
-    this.renderer.setClearColor(0x7B8CCE, 1.0);
-    this.scene.fog = new THREE.Fog(0x7B8CCE, 1, 65535);
+    this.scene.fog = new THREE.Fog(clearColor, this.cameraFar, this.cameraFar);
 
-    this.camera = new THREE.PerspectiveCamera(60, this.width/this.height, 1, 65535);
+    this.camera = new THREE.PerspectiveCamera(60, this.width/this.height, this.cameraNear, this.cameraFar);
     this.camera.rotation.order = "YXZ";
 
-    this.camera.translateY(4000);
+    this.camera.translateX(cameraDefaultPos.x);
+    this.camera.translateY(cameraDefaultPos.y);
+    this.camera.translateZ(cameraDefaultPos.z);
 
     this.dom['render'].onkeydown = function(e)
     {
@@ -134,8 +150,10 @@ function Viewer(queryDomContainer)
         return false;
     }
 
-    var lastMovementX = 0;
-    var lastMovementY = 0;
+    this.dom['render'].onmouseup = function(e)
+    {
+        document.exitPointerLock();
+    }
 
     this.dom['render'].onmousemove = function(e)
     {
@@ -167,11 +185,15 @@ function Viewer(queryDomContainer)
         }
     }
 
-    this.dom['render'].onmouseup = function(e)
+    this.dom['render'].onwheel = function(e)
     {
-        lastMovementX = 0;
-        lastMovementY = 0;
-        document.exitPointerLock();
+        var d = -(e.deltaY / 100);
+        _this.cameraSpeed += d * 5;
+
+        if(_this.cameraSpeed < 10)
+        {
+            _this.cameraSpeed = 10;
+        }
     }
 
     window.addEventListener('resize', function(e)
@@ -190,56 +212,71 @@ function Viewer(queryDomContainer)
         _this.renderer.setScissor(0, 0, _this.width, _this.height);
     });
 
-    const CAM_MV_SPD = 30;
-
     this.keyEvents = {
 	    //27: function(){ _this.resetCamera() }, // esc - reset camera position
-	    87: function(viewer){ viewer.camSpeedZ = -CAM_MV_SPD; }, // w - move forward
-	    65: function(viewer){ viewer.camSpeedX = -CAM_MV_SPD; }, // a - pan left
-	    83: function(viewer){ viewer.camSpeedZ = CAM_MV_SPD; }, // s - move backward
-	    68: function(viewer){ viewer.camSpeedX = CAM_MV_SPD; }, // d - pan right
-	    90: function(viewer){ viewer.camSpeedY = -CAM_MV_SPD; }, // z - move down
-	    88: function(viewer){ viewer.camSpeedY = CAM_MV_SPD; }, // x - move up
-	    40: function(viewer){ viewer.camRotSpeedX = -20; }, // down - rotate down
-	    38: function(viewer){ viewer.camRotSpeedX =  20; }, // up - rotate up
-	    37: function(viewer){ viewer.camRotSpeedY =  20;;}, // left - rotate left
-	    39: function(viewer){ viewer.camRotSpeedY = -20;}  // right - rotate right
-    }
-}
-
-Viewer.prototype.initDOM = function(queryDomContainer)
-{
-    var _this = this;
-
-    var dom = {
-        'container': document.querySelector(queryDomContainer),
-        'render': this.renderer.domElement
+	    87: function(viewer){ viewer.camStepZ = -viewer.cameraSpeed; }, // w - move forward
+	    65: function(viewer){ viewer.camStepX = -viewer.cameraSpeed; }, // a - pan left
+	    83: function(viewer){ viewer.camStepZ = viewer.cameraSpeed; }, // s - move backward
+	    68: function(viewer){ viewer.camStepX = viewer.cameraSpeed; }, // d - pan right
+	    90: function(viewer){ viewer.camStepY = -viewer.cameraSpeed; }, // z - move down
+	    88: function(viewer){ viewer.camStepY = viewer.cameraSpeed; }, // x - move up
+	    40: function(viewer){ viewer.camRotStepX = -20; }, // down - rotate down
+	    38: function(viewer){ viewer.camRotStepX =  20; }, // up - rotate up
+	    37: function(viewer){ viewer.camRotStepY =  20; }, // left - rotate left
+	    39: function(viewer){ viewer.camRotStepY = -20; }  // right - rotate right
     };
 
-    dom['container'].appendChild(dom['render']);
-    this.dom = dom;
+    this.registerLayer('main_mesh', 'Main mesh');
+    this.registerLayer('solid_objects', 'Solid Objects');
+    this.registerLayer('items', 'Items');
+
+    this.hud.addMonitor("X", () => this.camera.position.x.toFixed(2));
+    this.hud.addMonitor("Y", () => this.camera.position.y.toFixed(2));
+    this.hud.addMonitor("Z", () => this.camera.position.z.toFixed(2));
+    this.hud.addMonitor("Camera speed", () => this.cameraSpeed);
+
+    this.hud.addCheckbox("Enable fog", (checked) => {
+        this.scene.fog.near = checked ? 1 : 65535;
+        this.scene.fog.far = checked ? 2000 : 65535;
+    });
+
+    this.hud.addCheckbox("Low resolution", (checked) => {
+        this.renderer.setPixelRatio(window.devicePixelRatio * (checked ? 0.5 : 1));
+    });
+
+    this.hud.addCheckbox("Show objects", (checked) => {
+        this.setLayerVisible('solid_objects', checked);
+    }, true);
+
+    this.hud.addCheckbox("Show main mesh", (checked) => {
+        this.setLayerVisible('main_mesh', checked);
+    }, true);
+
+    this.hud.addCheckbox("Wireframe", (checked) => {
+        viewer.layers['main_mesh'].objects[0].material.forEach(mat => {
+            mat.wireframe = checked;
+        });
+    });
+}
+
+Viewer.prototype.registerLayer = function(name, label)
+{
+    this.layers[name] = { label: label, objects: [] };
 }
 
 Viewer.prototype.animate = function()
 {
-    viewer.camera.translateZ(this.camSpeedZ);
-    viewer.camera.translateX(this.camSpeedX);
-    viewer.camera.translateY(this.camSpeedY);
+    this.camera.translateZ(this.camStepZ);
+    this.camera.translateX(this.camStepX);
+    this.camera.translateY(this.camStepY);
 
-    viewer.camera.rotateX(this.camRotSpeedX / 1000);
-    viewer.camera.rotateY(this.camRotSpeedY / 1000);
-    viewer.camera.rotation.z = 0;
+    this.camera.rotateX(this.camRotStepX / 1000);
+    this.camera.rotateY(this.camRotStepY / 1000);
+    this.camera.rotation.z = 0;
 
-    if(this.camSpeedZ < 0) this.camSpeedZ += 5;
-    if(this.camSpeedZ > 0) this.camSpeedZ -= 5;
-    if(this.camSpeedX > 0) this.camSpeedX -= 5;
-    if(this.camSpeedX < 0) this.camSpeedX += 5;
-    if(this.camSpeedY > 0) this.camSpeedY -= 5;
-    if(this.camSpeedY < 0) this.camSpeedY += 5;
-    if(this.camRotSpeedX > 0) this.camRotSpeedX -= 1;
-    if(this.camRotSpeedX < 0) this.camRotSpeedX += 1;
-    if(this.camRotSpeedY > 0) this.camRotSpeedY -= 1;
-    if(this.camRotSpeedY < 0) this.camRotSpeedY += 1;
+    this.camStepX *= 0.5;
+    this.camStepY *= 0.5;
+    this.camStepZ *= 0.5;
 
     for(var k in this.keysDown)
     {
@@ -247,20 +284,30 @@ Viewer.prototype.animate = function()
     }
 
     this.renderer.render(this.scene, this.camera);
-    //console.log(this.renderer.info.render.calls);
+    this.hud.update();
 
     requestAnimationFrame(this.animate.bind(this));
 }
 
-Viewer.prototype.sceneAdd = function(tag, objectArray)
+Viewer.prototype.sceneAdd = function(layerName, objects)
 {
-    var visible = this.objects[tag].visible;
-    for(var i in objectArray)
+    for(var i in objects)
     {
-        objectArray[i].visible = visible;
-        this.scene.add(objectArray[i]);
+        this.scene.add(objects[i]);
+        this.layers[layerName].objects.push(objects[i]);
     }
-    this.objects[tag].objects.push(objectArray);
+}
+
+Viewer.prototype.setLayerVisible = function(layerName, visible)
+{
+    if(typeof this.layers[layerName] == 'undefined')
+    {
+        return;
+    }
+
+    this.layers[layerName].objects.forEach(object => {
+        object.visible = visible
+    });
 }
 
 Viewer.prototype.loadMap = function()
@@ -395,14 +442,11 @@ Viewer.prototype.loadMap = function()
     geometry.setIndex(indices);
 
     var mesh = new THREE.Mesh(geometry, this.materials);
-    this.scene.add(mesh);
+
+    this.sceneAdd('main_mesh', [ mesh ]);
 
     this.addAllItems();
     this.addAllSolidObjects();
-
-    //var wfMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, wireframe: true, transparent: true, opacity: 0.15 });
-    //var wfMesh = new THREE.Mesh(geometry, wfMaterial);
-    //this.scene.add(wfMesh);
 }
 
 Viewer.prototype.addAllItems = function()
@@ -423,7 +467,8 @@ Viewer.prototype.addAllItems = function()
     var fPositions = new Float32Array(positions);
     geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
     var points = new THREE.Points(geometry, material);
-    this.scene.add(points);
+
+    this.sceneAdd('items', [ points ]);
 }
 
 Viewer.prototype.getModelIndex = function(modelId_hi, modelId_lo)
@@ -490,7 +535,7 @@ Viewer.prototype.addAllSolidObjects = function()
             instancedMesh.setMatrixAt(i, matrix);
         }
 
-        this.scene.add(instancedMesh);
+        this.sceneAdd('solid_objects', [ instancedMesh ]);
     }
 }
 
@@ -672,6 +717,58 @@ Viewer.prototype.loadRom = function(abRom)
     this.dvRom = new DataView(abRom);
 
     this.loadMap();
+}
+
+//////////////////////////////////////////////////
+
+function ViewerHUD()
+{
+    this.domElement = document.createElement('div');
+    this.domElement.style = "position: absolute; margin: 10px; padding: 10px; font-size: 11px; background-color: rgba(0, 0, 0, 0.2); font-family: consolas, monospace;";
+    this.variables = [];
+}
+
+ViewerHUD.prototype.addMonitor = function(label, getter)
+{
+    var domRow = document.createElement('div');
+    var domLabel = document.createElement('span');
+    var domValue = document.createElement('span');
+    domLabel.innerHTML = label;
+    domRow.appendChild(domLabel);
+    domRow.appendChild(new Text(': '));
+    domRow.appendChild(domValue);
+    this.domElement.appendChild(domRow);
+    this.variables.push({ domValue: domValue, getter: getter });
+}
+
+ViewerHUD.prototype.addCheckbox = function(label, onchange, defaultValue)
+{
+    var domRow = document.createElement('div');
+    var domLabel = document.createElement('label');
+    var domCheckbox = document.createElement('input');
+    domLabel.style = "font-family: inherit;"
+    domCheckbox.style = "margin: 0px 2px 0px 0px; vertical-align: bottom;";
+    domCheckbox.setAttribute('type', 'checkbox');
+    domLabel.appendChild(domCheckbox);
+    domLabel.appendChild(new Text(label));
+    domRow.appendChild(domLabel);
+    
+    domCheckbox.checked = defaultValue;
+
+    domCheckbox.addEventListener('change', function(e)
+    {
+        onchange(e.target.checked);
+    });
+
+    this.domElement.appendChild(domRow);
+}
+
+ViewerHUD.prototype.update = function()
+{
+    for(var i in this.variables)
+    {
+        this.variables[i].domValue.innerHTML = this.variables[i].getter();
+    }
 }
 
 //////////////////////////////////////////////////
