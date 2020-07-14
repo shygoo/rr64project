@@ -231,7 +231,7 @@ function Node10(dv, offset)
     this.size = dv.getUint32(offset + 0x04);
     this.marker = dv.getUint32(offset + 0x08);
     this.numPackets = dv.getUint16(offset + 0x0C);
-    this.unk08 = dv.getUint16(offset + 0x0E);
+    this.offsTextureFile = dv.getUint16(offset + 0x0E);
     this.unk10 = dv.getUint16(offset + 0x10); // (always 0x0005?)
     this.unk12 = dv.getUint16(offset + 0x12); // (always 0x0004?)
     this.unk14 = dv.getUint32(offset + 0x14);

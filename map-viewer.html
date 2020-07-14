@@ -89,7 +89,6 @@ function Viewer(queryDomContainer)
     
     this.renderer.setScissorTest(true);
     this.renderer.alpha = true;
-    this.renderer.setClearColor(0x555555, 1.0);
     this.renderer.setSize(this.width, this.height);
     this.renderer.setViewport(0, 0, this.width, this.height);
     this.renderer.setScissor(0, 0, this.width, this.height);
@@ -335,7 +334,9 @@ Viewer.prototype.loadMap = function()
             polygonOffset: true,
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
-            map: dataTexture
+            map: dataTexture,
+            transparent: !!(textureFile.flags & 0x4000),
+            alphaTest: 0.3
         });
     }
 
@@ -399,7 +400,7 @@ Viewer.prototype.loadMap = function()
     this.addAllItems();
     this.addAllSolidObjects();
 
-    //var wfMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, wireframe: true, transparent: true, opacity: 0.01 });
+    //var wfMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, wireframe: true, transparent: true, opacity: 0.15 });
     //var wfMesh = new THREE.Mesh(geometry, wfMaterial);
     //this.scene.add(wfMesh);
 }
@@ -518,7 +519,7 @@ Viewer.prototype.loadTexture = function(dvTexture)
         return null;
     }
 
-    return { data: data, width: width, height: height };
+    return { data: data, width: width, height: height, flags: textureHeader.unk24 };
 }
 
 Viewer.prototype.loadMesh = function(dvMesh)
@@ -605,15 +606,62 @@ Viewer.prototype.createInstancedModel = function(modelIndex, count)
     
     var geometry = new THREE.BufferGeometry();
 
-    var fPositions = new Float32Array(model.positions);
-    var fColors = new Float32Array(model.colors);
-    
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(fPositions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(fColors, 3));
-    geometry.setIndex(model.indices);
+    var positions = [];
+    var colors = [];
+    var uvs = [];
+    var indices = [];
+    var materials = [];
 
-    var material = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors, side: THREE.DoubleSide });
-    var mesh = new THREE.InstancedMesh(geometry, material, count);
+    for(var texIndex in model.textures)
+    {
+        var textureFile = model.textures[texIndex];
+
+        var dataTexture = new THREE.DataTexture(textureFile.data, textureFile.width, textureFile.height, THREE.RGBAFormat);
+        dataTexture.wrapS = THREE.RepeatWrapping;
+        dataTexture.wrapT = THREE.RepeatWrapping;
+        dataTexture.magFilter = THREE.LinearFilter;
+
+        var material = new THREE.MeshBasicMaterial({
+            //vertexColors: THREE.VertexColors,
+            side: THREE.BackSide,
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1,
+            map: dataTexture,
+            transparent: !!(textureFile.flags & 0x4000),
+            alphaTest: 0.3
+        });
+
+        materials.push(material);
+    }
+
+    for(var texIndex in model.groups)
+    {
+        var group = model.groups[texIndex];
+
+        var start = indices.length;
+        var numTriangles = group.indices.length;
+
+        var indexBase = positions.length / 3;
+
+        for(var i in group.positions) positions.push(group.positions[i]);
+        for(var i in group.colors) colors.push(group.colors[i]);
+        for(var i in group.uvs) uvs.push(group.uvs[i]);
+        for(var i in group.indices) indices.push(indexBase + group.indices[i]);
+
+        geometry.addGroup(start, numTriangles, texIndex);
+    }
+    
+    var fPositions = new Float32Array(positions);
+    //var fColors = new Float32Array(colors);
+    var fUVs = new Float32Array(uvs);
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+    //geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(fUVs, 2));
+    geometry.setIndex(indices);
+
+    var mesh = new THREE.InstancedMesh(geometry, materials, count);
 
     return mesh;
 }

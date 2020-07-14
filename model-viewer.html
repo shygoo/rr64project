@@ -262,15 +262,63 @@ Viewer.prototype.addModel = function(modelIndex, x, y, z)
     
     var geometry = new THREE.BufferGeometry();
 
-    var fPositions = new Float32Array(model.positions);
-    var fColors = new Float32Array(model.colors);
-    
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(fPositions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(fColors, 3));
-    geometry.setIndex(model.indices);
+    var positions = [];
+    var colors = [];
+    var uvs = [];
+    var indices = [];
+    var materials = [];
 
-    var material = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors, side: THREE.DoubleSide });
-    var mesh = new THREE.Mesh(geometry, material);
+    for(var texIndex in model.textures)
+    {
+        var textureFile = model.textures[texIndex];
+
+        var dataTexture = new THREE.DataTexture(textureFile.data, textureFile.width, textureFile.height, THREE.RGBAFormat);
+        dataTexture.wrapS = THREE.RepeatWrapping;
+        dataTexture.wrapT = THREE.RepeatWrapping;
+        dataTexture.magFilter = THREE.LinearFilter;
+
+        var material = new THREE.MeshBasicMaterial({
+            //vertexColors: THREE.VertexColors,
+            side: THREE.BackSide,
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1,
+            map: dataTexture,
+            transparent: !!(textureFile.flags & 0x4000),
+            alphaTest: 0.3
+        });
+
+        materials.push(material);
+    }
+
+    for(var texIndex in model.groups)
+    {
+        var group = model.groups[texIndex];
+
+        var start = indices.length;
+        var numTriangles = group.indices.length;
+
+        var indexBase = positions.length / 3;
+
+        for(var i in group.positions) positions.push(group.positions[i]);
+        for(var i in group.colors) colors.push(group.colors[i]);
+        for(var i in group.uvs) uvs.push(group.uvs[i]);
+        for(var i in group.indices) indices.push(indexBase + group.indices[i]);
+
+        geometry.addGroup(start, numTriangles, texIndex);
+    }
+    
+    var fPositions = new Float32Array(positions);
+    var fColors = new Float32Array(colors);
+    var fUVs = new Float32Array(uvs);
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+    //geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(fUVs, 2));
+    geometry.setIndex(indices);
+
+    //var material = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors, side: THREE.DoubleSide });
+    var mesh = new THREE.Mesh(geometry, materials);
     mesh.position.set(x, y, z);
     this.scene.add(mesh);
 }
@@ -281,15 +329,17 @@ var model = null;
 var viewer = new Viewer('#container');
 viewer.animate();
 
-attachDropZone('body', function(ab)
+function onromloaded(ab)
 {
     viewer.loadRom(ab);
-});
+}
 
-attachFileReader('#file', function(ab)
+function onromloading()
 {
-    viewer.loadRom(ab);
-});
+}
+
+attachDropZone('body', onromloaded, onromloading);
+attachFileReader('#file', onromloaded, onromloading);
 
 </script>
 </body>

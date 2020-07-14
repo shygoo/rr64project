@@ -8,23 +8,34 @@ function RR64Model(dv, bDebug)
     this.uvs = [];
     this.indices = [];
 
+    this.groups = {};
+
+    this.textureFileIndices= {};
+    this.textures = [];
+    this.materials = [];
+
     // collect textures
     for(var i = 0; i < header.numTextures; i++)
     {
         var offsRef = ModelHeader.SIZE + (i * Reference.SIZE);
         var reference = new Reference(dv, offsRef);
         var offsTextureFile = offsRef + reference.offset;
-        var signature = dv.getUint32(offsTextureFile + 0x00);
 
-        var textureHeader = new TextureHeader(dv, offsTextureFile);
+        this.textureFileIndices[offsTextureFile] = i;
+        var dvTexture = dvpart(this.dv, offsTextureFile, reference.size);
+        this.textures[i] = this.loadTexture(dvTexture);
 
         //console.log(textureHeader.fileName);
         // todo handle 0x16/0x17 texture file
-        // todo find where textures are indexed
     }
 
     var offset = 0x40 + header.offsCommands;
     this.processNode(offset);
+
+    //for(var texIndex in groups)
+    //{
+    //    
+    //}
 }
 
 RR64Model.prototype.processNode = function(offset)
@@ -99,16 +110,30 @@ RR64Model.prototype.processNode11 = function(offset)
 RR64Model.prototype.processNode10 = function(offset)
 {
     var node = new Node10(this.dv, offset);
-
-    //console.log('            ' + offset.hex(), 'node10', JSON.stringify(node));
-
     var packetOffset = offset + Node10.SIZE;
     var dv = this.dv;
+
+    var texIndex = this.textureFileIndices[offset - node.offsTextureFile * 8];
+    var textureInfo = this.textures[texIndex];
+    var texWidth = textureInfo.width;
+    var texHeight = textureInfo.height;
+
+    if(!this.groups[texIndex])
+    {
+        this.groups[texIndex] = {
+            positions: [],
+            uvs: [],
+            colors: [],
+            indices: []
+        };
+    }
+
+    var group = this.groups[texIndex];
 
     // todo clean up code reuse
     for(var nPacket = 0; nPacket < node.numPackets; nPacket++)
     {
-        var indexBase = this.positions.length / 3;
+        var indexBase = group.positions.length / 3;
         var packetHeader = new SubMeshPacketHeader(dv, packetOffset);
 
         //console.log('                ' + packetOffset.hex(), packetHeader);
@@ -120,9 +145,10 @@ RR64Model.prototype.processNode10 = function(offset)
         {
             var offsVertex = verticesOffset + (nVertex * 16);
             var vertex = new SPVertex(dv, offsVertex);
-            this.positions.push(-(vertex.x), vertex.z, vertex.y);
-            this.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
-            //this.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
+
+            group.positions.push(-(vertex.x), vertex.z, vertex.y);
+            group.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
+            group.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
         }
 
         for(var nTri = 0; nTri < packetHeader.numTriangles; nTri++)
@@ -132,10 +158,39 @@ RR64Model.prototype.processNode10 = function(offset)
             var v0 = (tri >> 10) & 0x1F;
             var v1 = (tri >>  5) & 0x1F;
             var v2 = (tri >>  0) & 0x1F;
-            this.indices.push(indexBase + v0, indexBase + v1, indexBase + v2);
+            group.indices.push(indexBase + v0, indexBase + v1, indexBase + v2);
             //console.log(indexBase, v0, v1, v2);
         }
 
         packetOffset += packetHeader.packetSize;
     }
+}
+
+// todo cleanup repeated code
+RR64Model.prototype.loadTexture = function(dvTexture)
+{
+    // TODO handle animated textures
+    var textureHeader = new TextureHeader(dvTexture, 0);
+    var ciOffset = TextureHeader.SIZE;
+    var width = textureHeader.width;
+    var height = textureHeader.height;
+
+    var data = null;
+
+    if(textureHeader.format == TEX_FMT_CI4)
+    {
+        var tlutOffset = ciOffset + (width * height) / 2;
+        data = rgba32_texture_from_ci4(dvTexture, ciOffset, tlutOffset, width, height);
+    }
+    else if(textureHeader.format == TEX_FMT_CI8)
+    {
+        var tlutOffset = ciOffset + (width * height);
+        data = rgba32_texture_from_ci8(dvTexture, ciOffset, tlutOffset, width, height);
+    }
+    else
+    {
+        return null;
+    }
+
+    return { data: data, width: width, height: height, flags: textureHeader.unk24 };
 }
