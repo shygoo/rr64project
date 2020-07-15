@@ -284,6 +284,8 @@ Viewer.prototype.animate = function()
     }
 
     this.renderer.render(this.scene, this.camera);
+    this.framesDrawn++;
+
     this.hud.update();
 
     requestAnimationFrame(this.animate.bind(this));
@@ -451,24 +453,43 @@ Viewer.prototype.loadMap = function()
 
 Viewer.prototype.addAllItems = function()
 {
-    var numItems = this.dvRom.getUint32(RA_ITEM_COUNT);
-    var geometry = new THREE.BufferGeometry();
-    var material = new THREE.PointsMaterial({ color: 0xFF0000, size: 20 });
+    // load item textures
+    // todo should technically use the table at 0x01E09368 for this
+    var materials = [];
+    var raItemTexture = 0x01F49730;
 
-    var positions = [];
+    for(var i = 0; i < 16; i++)
+    {
+        var data = rgba32_texture_from_i8(this.dvRom, raItemTexture, 64, 64);
+        var dataTexture = new THREE.DataTexture(data, 64, 64, THREE.RGBAFormat);
+        dataTexture.magFilter = THREE.LinearFilter;
+        var material = new THREE.SpriteMaterial({ map: dataTexture, color: 0xFF0000 });
+        materials.push(material);
+        raItemTexture += 0x1000;
+    }
+
+    // todo where is this defined
+    const itemMatIndices = [
+        null, 0x0D, 0x0E, 0x0F, 0x0C, 0x06, 0x00, 0x02,
+        0x05, 0x09, 0x08, 0x01, 0x03, 0x0B, 0x0A, 0x07,
+        0x04
+    ];
+
+    var meshes = [];
+    var numItems = this.dvRom.getUint32(RA_ITEM_COUNT);
 
     for(var nItem = 0; nItem < numItems; nItem++)
     {
         var raItem = RA_ITEM_TABLE + nItem * Item.SIZE;
         var item = new Item(this.dvRom, raItem);
-        positions.push(-item.x * 4, item.z * 4, item.y * 4)
+
+        var sprite = new THREE.Sprite(materials[itemMatIndices[item.id]]);
+        sprite.position.set(-item.x * 4, item.z * 4, item.y * 4);
+        sprite.scale.set(15, 15, 15);
+        meshes.push(sprite);
     }
-
-    var fPositions = new Float32Array(positions);
-    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
-    var points = new THREE.Points(geometry, material);
-
-    this.sceneAdd('items', [ points ]);
+    
+    this.sceneAdd('items', meshes);
 }
 
 Viewer.prototype.getModelIndex = function(modelId_hi, modelId_lo)
