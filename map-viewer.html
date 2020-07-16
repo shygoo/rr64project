@@ -334,10 +334,10 @@ Viewer.prototype.loadMap = function()
     });
 
     // collect textures
-    for(var i = 0; i < NUM_FILES; i++)
+    for(var i = 0; i < NUM_MAP_MODELS; i++)
     {
         // 0x18 = file system header size
-        var entryOffset = RA_FILE_TABLE + 0x18 + (i * FileEntry.SIZE);
+        var entryOffset = RA_MAP_MODEL_TABLE + 0x18 + (i * FileEntry.SIZE);
         var fileEntry = new FileEntry(this.dvRom, entryOffset)
 
         if(fileEntry.offset == 0)
@@ -362,7 +362,7 @@ Viewer.prototype.loadMap = function()
     }
 
     // create material for each texture
-    for(var i = 0; i < NUM_FILES; i++)
+    for(var i = 0; i < NUM_MAP_MODELS; i++)
     {
         var textureFile = this.textureFiles[i];
 
@@ -394,10 +394,10 @@ Viewer.prototype.loadMap = function()
         });
     }
 
-    for(var i = 0; i < NUM_FILES; i++)
+    for(var i = 0; i < NUM_MAP_MODELS; i++)
     {
         // 0x18 = file system header size
-        var entryOffset = RA_FILE_TABLE + 0x18 + (i * FileEntry.SIZE);
+        var entryOffset = RA_MAP_MODEL_TABLE + 0x18 + (i * FileEntry.SIZE);
         var fileEntry = new FileEntry(this.dvRom, entryOffset)
 
         if(fileEntry.offset == 0)
@@ -809,6 +809,9 @@ Viewer.prototype.loadRom = function(abRom)
 {
     this.abRom = abRom;
     this.dvRom = new DataView(abRom);
+
+    var rr64 = new RoadRash64(this.dvRom);
+    console.log(rr64);
 
     this.loadMap();
     this.setLayerVisible('collision', false);
