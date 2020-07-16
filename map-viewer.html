@@ -229,6 +229,7 @@ function Viewer(queryDomContainer)
     this.registerLayer('main_mesh', 'Main mesh');
     this.registerLayer('solid_objects', 'Solid Objects');
     this.registerLayer('items', 'Items');
+    this.registerLayer('collision', 'Collision');
 
     this.hud.addMonitor("X", () => this.camera.position.x.toFixed(2));
     this.hud.addMonitor("Y", () => this.camera.position.y.toFixed(2));
@@ -251,6 +252,10 @@ function Viewer(queryDomContainer)
     this.hud.addCheckbox("Show main mesh", (checked) => {
         this.setLayerVisible('main_mesh', checked);
     }, true);
+
+    this.hud.addCheckbox("Show collision", (checked) => {
+        this.setLayerVisible('collision', checked);
+    });
 
     this.hud.addCheckbox("Wireframe", (checked) => {
         viewer.layers['main_mesh'].objects[0].material.forEach(mat => {
@@ -599,6 +604,77 @@ Viewer.prototype.loadMesh = function(dvMesh)
         var dvSubMesh = dvpart(dvMesh, subMeshInfo.subMeshOffset + entryOffset, subMeshInfo.subMeshSize);
         this.addSubMesh(dvSubMesh, meshHeader.worldX, meshHeader.worldY, meshHeader.worldZ);
     }
+
+    // collision
+    // todo optimize
+
+    var collisionGeometry = new THREE.BufferGeometry();
+    var collisionPositions = [];
+    var collisionColors = [];
+
+    const surfaceTypeColors = [
+        /*00*/ null,
+        /*01*/ [1, 0, 0],
+        /*02*/ [0, 1, 0],
+        /*03*/ [0, 0, 1],
+        /*04*/ [1, 1, 0],
+        /*05*/ [1, 0, 1],
+        /*06*/ [0, 1, 1],
+        /*07*/ [1, 1, 1],
+        /*08*/ [0.5, 0, 0],
+        /*09*/ [0, 0.5, 0],
+        /*0A*/ [0, 0, 0.5],
+        /*0B*/ [0.5, 0.5, 0],
+        /*0C*/ [0.5, 0, 0.5],
+        /*0D*/ [0, 0.5, 0.5],
+        /*0E*/ [0.5, 0.5, 0.5]
+    ];
+
+    var collisionHeader = new CollisionHeader(dvMesh, meshHeader.offsCollision);
+    for(var nGroup = 0; nGroup < collisionHeader.numGroups; nGroup++)
+    {
+        var offsCollisionGroup = dvMesh.getUint16(meshHeader.offsCollision + CollisionHeader.SIZE + nGroup * 2);
+        var groupHeader = new CollisionGroupHeader(dvMesh, meshHeader.offsCollision + offsCollisionGroup);
+        var offsTriangleList = meshHeader.offsCollision + offsCollisionGroup + CollisionGroupHeader.SIZE;
+
+        for(var nList = 0; nList < groupHeader.numTriangleLists; nList++)
+        {
+            var triangleListHeader = new CollisionTriangleListHeader(dvMesh, offsTriangleList);
+            offsTriangleList += CollisionTriangleListHeader.SIZE;
+
+            var color = surfaceTypeColors[triangleListHeader.attributeId];
+
+            for(var nTri = 0; nTri < triangleListHeader.numTriangles; nTri++)
+            {
+                var tri = new Triangle(dvMesh, offsTriangleList);
+                offsTriangleList += Triangle.SIZE;
+
+                var vertex0 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v0 * SPVertex.SIZE);
+                var vertex1 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v1 * SPVertex.SIZE);
+                var vertex2 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v2 * SPVertex.SIZE);
+
+                
+
+                collisionPositions.push(-(meshHeader.worldX + vertex0.x), (meshHeader.worldZ + vertex0.z) / 2, (meshHeader.worldY + vertex0.y));
+                collisionPositions.push(-(meshHeader.worldX + vertex1.x), (meshHeader.worldZ + vertex1.z) / 2, (meshHeader.worldY + vertex1.y));
+                collisionPositions.push(-(meshHeader.worldX + vertex2.x), (meshHeader.worldZ + vertex2.z) / 2, (meshHeader.worldY + vertex2.y));
+
+                collisionColors.push(color[0], color[1], color[2]);
+                collisionColors.push(color[0], color[1], color[2]);
+                collisionColors.push(color[0], color[1], color[2]);
+            }
+
+            if((offsTriangleList % 4) != 0) offsTriangleList += 2;
+        }
+    }
+
+    var fCollisionPositions = new Float32Array(collisionPositions);
+    var fCollisionColors = new Float32Array(collisionColors);
+    collisionGeometry.setAttribute('position', new THREE.BufferAttribute(fCollisionPositions, 3));
+    collisionGeometry.setAttribute('color', new THREE.BufferAttribute(fCollisionColors, 3));
+    var material = new THREE.MeshBasicMaterial({ wireframe: true, vertexColors: THREE.VertexColors });
+    var collisionMesh = new THREE.Mesh(collisionGeometry, material);
+    this.sceneAdd('collision', [ collisionMesh ]);
 }
 
 Viewer.prototype.addSubMesh = function(dv, worldX, worldY, worldZ)
@@ -644,12 +720,9 @@ Viewer.prototype.addSubMesh = function(dv, worldX, worldY, worldZ)
 
         for(var nTri = 0; nTri < pktHeader.numTriangles; nTri++)
         {
-            var offset = trianglesOffset + (nTri * 2);
-            var tri = dv.getUint16(offset);
-            var v0 = (tri >> 10) & 0x1F;
-            var v1 = (tri >>  5) & 0x1F;
-            var v2 = (tri >>  0) & 0x1F;
-            group.indices.push(indexBase + v0, indexBase + v1, indexBase + v2);
+            var offset = trianglesOffset + (nTri * Triangle.SIZE);
+            var tri = new Triangle(dv, offset);
+            group.indices.push(indexBase + tri.v0, indexBase + tri.v1, indexBase + tri.v2);
         }
 
         packetOffset += pktHeader.packetSize;
@@ -738,6 +811,7 @@ Viewer.prototype.loadRom = function(abRom)
     this.dvRom = new DataView(abRom);
 
     this.loadMap();
+    this.setLayerVisible('collision', false);
 }
 
 //////////////////////////////////////////////////

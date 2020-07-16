@@ -50,6 +50,8 @@ function SPVertex(dv, offset)
     this.a = dv.getUint8(offset + 0x0F);
 }
 
+SPVertex.SIZE = 0x10;
+
 function FileEntry(dv, offset)
 {
     this.offset = dv.getUint32(offset + 0x00);
@@ -83,8 +85,9 @@ function MeshHeader(dv, offset)
 {
     this.signature = dv.getUint32(offset + 0x00);
     this.meshFileSize = dv.getUint32(offset + 0x004);
+    // ...
     this.numSubMeshes = dv.getUint16(offset + 0x00C);
-    this.offsNonGfx = dv.getUint32(offset + 0x010); // collision stuff?
+    this.offsCollision = dv.getUint32(offset + 0x010);
     // ...
     this.worldX = dv.getFloat32(offset + 0x01C);
     this.worldY = dv.getFloat32(offset + 0x020);
@@ -92,7 +95,7 @@ function MeshHeader(dv, offset)
     // ...
 }
 
-function SubMeshInfo(dv, offset)
+function SubMeshInfo(dv, offset) // Reference
 {
     this.subMeshOffset = dv.getUint32(offset + 0x00);
     this.subMeshSize = dv.getUint32(offset + 0x04);
@@ -290,3 +293,45 @@ function ObjectDefinition(dv, offset)
 }
 
 ObjectDefinition.SIZE = 0x18;
+
+//////////////
+
+function Triangle(dv, offset)
+{
+    var data = dv.getUint16(offset);
+    this.v0 = (data >> 10) & 0x1F;
+    this.v1 = (data >>  5) & 0x1F;
+    this.v2 = (data >>  0) & 0x1F;
+}
+
+Triangle.SIZE = 0x02;
+
+//////////////
+
+function CollisionHeader(dv, offset)
+{
+    this.signature = dv.getUint32(offset + 0x00); // 0x0000003C
+    this.size = dv.getUint32(offset + 0x04);
+    this.unk08 = dv.getUint32(offset + 0x08);
+    this.unk0C = dv.getUint16(offset + 0x0C);
+    this.numGroups = dv.getUint16(offset + 0x0E);
+}
+
+CollisionHeader.SIZE = 0x10;
+
+function CollisionGroupHeader(dv, offset)
+{
+    this.marker = dv.getUint16(offset + 0x00);
+    this.numTriangleLists = dv.getUint16(offset + 0x02);
+}
+
+CollisionGroupHeader.SIZE = 0x04;
+
+function CollisionTriangleListHeader(dv, offset)
+{
+    this.offsVertices = dv.getUint16(offset + 0x00);
+    this.attributeId = dv.getUint8(offset + 0x02);
+    this.numTriangles = dv.getUint8(offset + 0x03);
+}
+
+CollisionTriangleListHeader.SIZE = 0x04;

@@ -80,8 +80,6 @@ function attachDropZone(query, onloadend, onloading)
 
         if(e.dataTransfer.files)
         {
-            
-
             var file = e.dataTransfer.files[0];
             var reader = new FileReader();
 
@@ -98,4 +96,33 @@ function attachDropZone(query, onloadend, onloading)
             }
         }
     });
+}
+
+function saveAs(filename, data)
+{
+    var blob = new Blob([data], {type: 'octet/stream'});
+    var url = window.URL.createObjectURL(blob);
+
+    if(navigator && navigator.msSaveBlob)
+    {
+        navigator.msSaveBlob(blob, filename);
+    }
+    else
+    {
+        var a = document.createElement('a');
+        a.style = "display: none;";
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        try
+        {
+            a.click();
+        }
+        catch(e)
+        {
+            console.error(e);
+        }
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    }
 }
