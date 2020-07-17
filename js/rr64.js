@@ -1,36 +1,26 @@
-// in RAM: 8018E480 static file table, 801B2840 active file table
-// file system header: 0000003E 00DDF0C0 00000000 0001 1170 03E8 1324 039E 0346
-// entries 0x0000 through 0x0404 are texture files
-// entries 0x0405+ are mesh files
+const RA_OBJECT_MODEL_CATEGORY_COUNTS = 0x000A8334;
+const RA_UNK_FILE                     = 0x000AA4C0;
+const RA_PATH_POINTS                  = RA_UNK_FILE + 0x418;
+const RA_RACE_TABLE                   = 0x000B67C4;
+const RA_MAP_PARTITION_TABLE_HEADER   = 0x0018D380; // 0000003E 00DDF0C0 00000000 00011170 03E8 1324 039E 0346 
+const RA_MAP_PARTITION_TABLE          = RA_MAP_PARTITION_TABLE_HEADER + 0x18; 
+const RA_OBJECT_MODEL_TABLE_HEADER    = 0x0101D440; // 00000040 00248800 00000001 00000175 (+ 0x30 padding bytes)
+const RA_OBJECT_MODEL_TABLE           = RA_OBJECT_MODEL_TABLE_HEADER + 0x40;
+const RA_OBJECT_PLACEMENT_TABLE       = 0x01265C50;
+const RA_OBJECT_DEFINITION_TABLE      = 0x01303208;
+const RA_NUM_ITEM_PLACEMENTS          = 0x01304DC0;
+const RA_ITEM_PLACEMENT_TABLE         = 0x01304DC4;
+// TODO these are part of a larger collection of textures referenced by
+// the table at 0x01E09368, should eventually use that instead
+const RA_ITEM_TEXTURES                = 0x01F49730;
 
-const RA_MODEL_CATEGORY_INDICES = 0x000A8334;
-
-const RA_UNK_FILE = 0x000AA4C0;
-const RA_PATH_DATA = RA_UNK_FILE + 0x418;
+const NUM_RACES = 58;
 const NUM_PATH_POINTS = 3053;
-
-const RA_MAP_MODEL_TABLE = 0x0018D380; 
-const NUM_MAP_MODELS = 0x16C2;
-
-// 0101D440: 00000040 00248800 00000001 00000175 // (175 = number of models)
-const RA_MODEL_TABLE_HEADER = 0x0101D440;
-const RA_MODEL_TABLE = 0x0101D480;
-const NUM_MODELS = 0x175;
-
-const RA_OBJECT_PLACEMENT_TABLE = 0x01265C50;
+const NUM_MAP_PARTITIONS = 0x16C2;
+const NUM_OBJECT_MODELS = 0x175;
 const NUM_PLACEMENT_FILES = 4900; // is this correct?
-
-const RA_OBJECT_DEFINITION_TABLE = 0x01303208;
 const NUM_OBJECT_DEFINITIONS = 0x127; // todo use header
 
-const RA_ITEM_COUNT = 0x01304DC0;
-const RA_ITEM_TABLE = 0x01304DC4;
-
-const RA_RACE_TABLE = 0x000B67C4;
-const NUM_RACES = 58;
-
-// TODO these are part of a larger collection of textures referenced by the table at 0x01E09368, should eventually use that instead
-const RA_ITEM_TEXTURES = 0x01F49730;
 const NUM_ITEM_TEXTURES = 16;
 const ITEM_TEX_INDICES = [ // todo where is this defined?
     null,
@@ -38,23 +28,31 @@ const ITEM_TEX_INDICES = [ // todo where is this defined?
     0x09, 0x08, 0x01, 0x03, 0x0B, 0x0A, 0x07, 0x04
 ];
 
-const SIG_TEXTURE      = 0x00000016;
-const SIG_ANIM_TEXTURE = 0x00000017;
-const SIG_SUBMESH      = 0x0000003D;
-const SIG_FILE_TABLE   = 0x0000003E;
-const SIG_MESH         = 0x0000003F;
+const SIG_TEXTURE                = 0x00000016;
+const SIG_ANIM_TEXTURE           = 0x00000017;
+const SIG_RACE_TABLE             = 0x0000003A; // not sure
+const SIG_COLLISION              = 0x0000003C;
+const SIG_MAP_SUBMESH            = 0x0000003D;
+const SIG_MAP_PARTITION_TABLE    = 0x0000003E;
+const SIG_MAP_PARTITION          = 0x0000003F;
+const SIG_OBJECT_MODEL_TABLE     = 0x00000040;
+const SIG_OBJECT_MODEL           = 0x00000041;
+const SIG_OBJECT_PLACEMENT_TABLE = 0x00000046; // not sure
+
+const SIG_MODEL_NODE_13 = 0x13;
+const SIG_MODEL_NODE_12 = 0x12;
+const SIG_MODEL_NODE_11 = 0x11;
+const SIG_MODEL_NODE_10 = 0x10;
 
 const TEX_FMT_CI4      = 0x04;
 const TEX_FMT_CI8      = 0x08;
-
-///////////////////
 
 function RoadRash64(dvRom)
 {
     this.dvRom = dvRom;
 
     this.mapTextures = this.parseMapTextures();
-    this.mapModels = this.parseMapModels();
+    this.mapPartitions = this.parseMapPartitions();
     this.objectDefinitions = this.parseObjectDefinitions();
     this.objectModels = this.parseObjectModels();
     this.objectPlacements = this.parseObjectPlacements();
@@ -64,67 +62,56 @@ function RoadRash64(dvRom)
 
 RoadRash64.prototype.parseMapTextures = function()
 {
-    var mapTextures = [];
+    var mapTextures = {};
+    var raReference = RA_MAP_PARTITION_TABLE;
 
-    // note: map textures and models share the same table
-    for(var i = 0; i < NUM_MAP_MODELS; i++)
+    for(var nPartition = 0; nPartition < NUM_MAP_PARTITIONS; nPartition++)
     {
-        // 0x18 = file system header size
-        var entryOffset = RA_MAP_MODEL_TABLE + 0x18 + (i * FileEntry.SIZE);
-        var fileEntry = new FileEntry(this.dvRom, entryOffset)
+        var partitionReference = new DataReference(this.dvRom, raReference)
 
-        if(fileEntry.offset == 0)
+        if(partitionReference.offset != 0)
         {
-            mapTextures.push(null);
-            continue;
+            var raPartition = raReference + partitionReference.offset;
+            var signature = this.dvRom.getUint32(raPartition + 0x00);
+            var dvFile = dvpart(this.dvRom, raPartition, partitionReference.size)
+    
+            if(signature == SIG_TEXTURE || signature == SIG_ANIM_TEXTURE)
+            {
+                mapTextures[nPartition] = RoadRash64.parseTextureFile(dvFile);
+            }
         }
 
-        var fileAddress = fileEntry.offset + entryOffset;
-        var signature = this.dvRom.getUint32(fileAddress + 0x00);
-        var dvFile = dvpart(this.dvRom, fileAddress, fileEntry.size)
-
-        if(signature == SIG_TEXTURE || signature == SIG_ANIM_TEXTURE)
-        {
-            var textureFile = this.parseTextureFile(dvFile);
-            mapTextures.push(textureFile);
-        }
-        else
-        {
-            mapTextures.push(null);
-        }
+        raReference += DataReference.SIZE;
     }
 
     return mapTextures;
 }
 
-RoadRash64.prototype.parseMapModels = function()
+RoadRash64.prototype.parseMapPartitions = function()
 {
-    var mapModels = [];
+    var mapPartitions = {};
+    var raReference = RA_MAP_PARTITION_TABLE;
 
-    // note: map textures and models share the same table
-    for(var i = 0; i < NUM_MAP_MODELS; i++)
+    for(var nPartition = 0; nPartition < NUM_MAP_PARTITIONS; nPartition++)
     {
-        // 0x18 = file system header size
-        var entryOffset = RA_MAP_MODEL_TABLE + 0x18 + (i * FileEntry.SIZE);
-        var fileEntry = new FileEntry(this.dvRom, entryOffset)
+        var partitionReference = new DataReference(this.dvRom, raReference);
 
-        if(fileEntry.offset == 0)
+        if(partitionReference.offset != 0)
         {
-            continue;
+            var raPartition = raReference + partitionReference.offset;
+            var signature = this.dvRom.getUint32(raPartition + 0x00);
+            var dvFile = dvpart(this.dvRom, raPartition, partitionReference.size)
+    
+            if(signature == SIG_MAP_PARTITION)
+            {
+                mapPartitions[nPartition] = this.parseMapPartition(dvFile);
+            }
         }
 
-        var fileAddress = fileEntry.offset + entryOffset;
-        var signature = this.dvRom.getUint32(fileAddress + 0x00);
-        var dvFile = dvpart(this.dvRom, fileAddress, fileEntry.size)
-
-        if(signature == SIG_MESH) // mesh file
-        {
-            var mapModel = this.parseMapMesh(dvFile);
-            mapModels.push(mapModel);
-        }
+        raReference += DataReference.SIZE;
     }
 
-    return mapModels;
+    return mapPartitions;
 }
 
 RoadRash64.prototype.parseObjectDefinitions = function()
@@ -133,7 +120,8 @@ RoadRash64.prototype.parseObjectDefinitions = function()
 
     for(var nObjectDef = 0; nObjectDef < NUM_OBJECT_DEFINITIONS; nObjectDef++)
     {
-        var objectDef = new ObjectDefinition(this.dvRom, RA_OBJECT_DEFINITION_TABLE + nObjectDef * ObjectDefinition.SIZE);
+        var raObjectDef = RA_OBJECT_DEFINITION_TABLE + nObjectDef * ObjectDefinition.SIZE;
+        var objectDef = new ObjectDefinition(this.dvRom, raObjectDef);
         objectDefinitions.push(objectDef);
     }
 
@@ -143,6 +131,17 @@ RoadRash64.prototype.parseObjectDefinitions = function()
 RoadRash64.prototype.parseObjectModels = function()
 {
     var objectModels = [];
+
+    for(var nObjectModel = 0; nObjectModel < NUM_OBJECT_MODELS; nObjectModel++)
+    {
+        var raModelRef = RA_OBJECT_MODEL_TABLE + nObjectModel * DataReference.SIZE;
+        var modelReference = new DataReference(this.dvRom, raModelRef);
+        var raObjectModel = raModelRef + modelReference.offset;
+        
+        var dvModelFile = dvpart(this.dvRom, raObjectModel, modelReference.size);
+
+        objectModels.push(new RR64ObjectModel(dvModelFile));
+    }
 
     return objectModels;
 }
@@ -168,7 +167,7 @@ RoadRash64.prototype.parseObjectPlacements = function()
         {
             var raPlacement = raFile + 0x88 + nPlacement * ObjectPlacement.SIZE;
             var placement = new ObjectPlacement(this.dvRom, raPlacement);
-            objectPlacements.push(placement); // todo should probably subarray each file
+            objectPlacements.push(placement); // todo should probably have a subarray each file
         }
     }
 
@@ -179,11 +178,13 @@ RoadRash64.prototype.parseItemTextures = function()
 {
     var itemTextures = [];
 
+    var raTexture = RA_ITEM_TEXTURES;
+
     for(var nTexture = 0; nTexture < NUM_ITEM_TEXTURES; nTexture++)
     {
-        var raTexture = RA_ITEM_TEXTURES + nTexture * 0x1000;
         var data = rgba32_texture_from_i8(this.dvRom, raTexture, 64, 64);
         itemTextures.push(data);
+        raTexture += 0x1000;
     }
 
     return itemTextures;
@@ -193,54 +194,51 @@ RoadRash64.prototype.parseItemPlacements = function()
 {
     var itemPlacements = [];
 
-    var numItems = this.dvRom.getUint32(RA_ITEM_COUNT);
-    
-    for(var nItem = 0; nItem < numItems; nItem++)
+    var numItemPlacements = this.dvRom.getUint32(RA_NUM_ITEM_PLACEMENTS);
+    var raItemPlacement = RA_ITEM_PLACEMENT_TABLE;
+
+    for(var nItem = 0; nItem < numItemPlacements; nItem++)
     {
-        var raItem = RA_ITEM_TABLE + nItem * Item.SIZE;
-        var item = new Item(this.dvRom, raItem);
-        itemPlacements.push(item);
+        itemPlacements.push(new ItemPlacement(this.dvRom, raItemPlacement));
+        raItemPlacement += ItemPlacement.SIZE;
     }
 
     return itemPlacements;
 }
 
-RoadRash64.prototype.parseMapMesh = function(dvMesh)
+RoadRash64.prototype.parseMapPartition = function(dvPartition)
 {
-    var subMeshes = [];
+    var partition = {
+        header: new MapPartitionHeader(dvPartition, 0x00),
+        subMeshes: []
+    };
 
-    var meshHeader = new MeshHeader(dvMesh, 0);
-    
-    for(var nSubMesh = 0; nSubMesh < meshHeader.numSubMeshes; nSubMesh++)
+    for(var nSubMesh = 0; nSubMesh < partition.header.numSubMeshes; nSubMesh++)
     {
+        var refOffset = 0xF0 + (nSubMesh * DataReference.SIZE);
+        var subMeshRef = new DataReference(dvPartition, refOffset);
+        var subMeshOffset = subMeshRef.offset + refOffset;
+
         var subMesh = {
-            info: null,
-            header: null,
+            header: new MapSubMeshHeader(dvPartition, subMeshOffset),
             geometryPackets: []
         };
 
-        var entryOffset = 0xF0 + (nSubMesh * 12);
-        var subMeshInfo = new SubMeshInfo(dvMesh, entryOffset);
-        var subMeshOffset = subMeshInfo.subMeshOffset + entryOffset;
-        var subMeshHeader = new SubMeshHeader(dvMesh, subMeshOffset);
 
-        subMesh.info = subMeshInfo;
-        subMesh.header = subMeshHeader;
+        var packetOffset = subMeshOffset + MapSubMeshHeader.SIZE;
 
-        var packetOffset = subMeshOffset + SubMeshHeader.SIZE;
-
-        for(var nPacket = 0; nPacket < subMeshHeader.numPackets; nPacket++)
+        for(var nPacket = 0; nPacket < subMesh.header.numPackets; nPacket++)
         {
-            var packet = this.parseGeometryPacket(dvMesh, packetOffset);
+            var packet = RoadRash64.parseGeometryPacket(dvPartition, packetOffset);
             packetOffset += packet.header.packetSize;
 
             subMesh.geometryPackets.push(packet);
         }
 
-        subMeshes.push(subMesh);
+        partition.subMeshes.push(subMesh);
     }
 
-    return subMeshes;
+    return partition;
 
     // collision
     // todo optimize
@@ -279,7 +277,7 @@ RoadRash64.prototype.parseMapMesh = function(dvMesh)
     //        var triangleListHeader = new CollisionTriangleListHeader(dvMesh, offsTriangleList);
     //        offsTriangleList += CollisionTriangleListHeader.SIZE;
 //
-    //        var color = surfaceTypeColors[triangleListHeader.attributeId];
+    //        var color = surfaceTypeColors[triangleListHeader.surfaceTypeId];
 //
     //        for(var nTri = 0; nTri < triangleListHeader.numTriangles; nTri++)
     //        {
@@ -314,46 +312,17 @@ RoadRash64.prototype.parseMapMesh = function(dvMesh)
     //this.sceneAdd('collision', [ collisionMesh ]);
 }
 
-RoadRash64.prototype.parseTextureFile = function(dvTexture)
-{
-    // TODO handle animated textures
-    var textureHeader = new TextureHeader(dvTexture, 0);
-    var ciOffset = TextureHeader.SIZE;
-    var width = textureHeader.width;
-    var height = textureHeader.height;
-
-    var data = null;
-
-    if(textureHeader.format == TEX_FMT_CI4)
-    {
-        var tlutOffset = ciOffset + (width * height) / 2;
-        data = rgba32_texture_from_ci4(dvTexture, ciOffset, tlutOffset, width, height);
-    }
-    else if(textureHeader.format == TEX_FMT_CI8)
-    {
-        var tlutOffset = ciOffset + (width * height);
-        data = rgba32_texture_from_ci8(dvTexture, ciOffset, tlutOffset, width, height);
-    }
-    else
-    {
-        return null;
-    }
-
-    return { data: data, width: width, height: height, flags: textureHeader.unk24 };
-}
-
 RoadRash64.prototype.getModelIndex = function(modelId_hi, modelId_lo)
 {
     var indexBase = 0;
-    for(var i = 0; i < modelId_hi; i++)
+    for(var nCategory = 0; nCategory < modelId_hi; nCategory++)
     {
-        indexBase += this.dvRom.getUint32(RA_MODEL_CATEGORY_INDICES + i * 4);
+        indexBase += this.dvRom.getUint32(RA_OBJECT_MODEL_CATEGORY_COUNTS + nCategory * 4);
     }
-
     return indexBase + modelId_lo;
 }
 
-RoadRash64.prototype.parseGeometryPacket = function(dv, packetOffset)
+RoadRash64.parseGeometryPacket = function(dv, packetOffset)
 {
     var packet = {
         header: null,
@@ -361,10 +330,9 @@ RoadRash64.prototype.parseGeometryPacket = function(dv, packetOffset)
         triangles: []
     };
 
-    packet.header = new SubMeshPacketHeader(dv, packetOffset);
-    //packet.header = packetHeader
+    packet.header = new GeometryPacketHeader(dv, packetOffset);
 
-    var offsVertices = packetOffset + SubMeshPacketHeader.SIZE;
+    var offsVertices = packetOffset + GeometryPacketHeader.SIZE;
     var offsTriangles = offsVertices + packet.header.verticesSize;
 
     for(var nVertex = 0; nVertex < packet.header.numVertices; nVertex++)
@@ -380,6 +348,50 @@ RoadRash64.prototype.parseGeometryPacket = function(dv, packetOffset)
     }
 
     return packet;
+}
+
+RoadRash64.parseTextureFile = function(dvTexture)
+{
+    // TODO handle animated textures
+    var textureHeader = new TextureHeader(dvTexture, 0);
+    var texelsOffset = TextureHeader.SIZE;
+    var width = textureHeader.width;
+    var height = textureHeader.height;
+
+    var bIntensity = !!(textureHeader.flags & 0x8000);
+
+    var data = null;
+
+    if(textureHeader.bitDepth == 4)
+    {
+        if(bIntensity)
+        {
+            data = rgba32_texture_from_i4(dvTexture, texelsOffset, width, height);
+        }
+        else
+        {
+            var tlutOffset = texelsOffset + (width * height) / 2;
+            data = rgba32_texture_from_ci4(dvTexture, texelsOffset, tlutOffset, width, height);
+        }
+    }
+    else if(textureHeader.bitDepth == 8)
+    {
+        if(bIntensity)
+        {
+            data = rgba32_texture_from_i8(dvTexture, texelsOffset, width, height);
+        }
+        else
+        {
+            var tlutOffset = texelsOffset + (width * height);
+            data = rgba32_texture_from_ci8(dvTexture, texelsOffset, tlutOffset, width, height);
+        }
+    }
+    else
+    {
+        return null;
+    }
+
+    return { data: data, width: width, height: height, flags: textureHeader.flags, header: textureHeader };
 }
 
 //////////////
@@ -399,38 +411,38 @@ function SPVertex(dv, offset)
 
 SPVertex.SIZE = 0x10;
 
-function FileEntry(dv, offset)
+function DataReference(dv, offset)
 {
     this.offset = dv.getUint32(offset + 0x00);
     this.size = dv.getUint32(offset + 0x04);
-    this.unk08 = dv.getUint32(offset + 0x08);
+    this.pointer = dv.getUint32(offset + 0x08);
 }
 
-FileEntry.SIZE = 0x0C;
+DataReference.SIZE = 0x0C;
 
 function TextureHeader(dv, offset)
 {
-    this.signature = dv.getUint32(offset + 0x00); // 16 = single image, 17 = multiple images for animation
+    this.signature = dv.getUint32(offset + 0x00); // SIG_TEXTURE (0x16) or SIG_ANIM_TEXTURE (0x17)
     this.textureFileSize = dv.getUint32(offset + 0x04);
     this.unk08 = dv.getUint32(offset + 0x08); // always FFFFFFFF
     this.fileName = dvgetstr(dv, offset + 0x0C);
-    this.numTextures = dv.getUint16(offset + 0x20); // usually 1, 2+ if animated
+    this.numFrames = dv.getUint16(offset + 0x20); // usually 1, 2+ if animated
     this.paletteSize = dv.getUint16(offset + 0x22);
-    this.unk24 = dv.getUint16(offset + 0x24);   // 0x4000 = need alpha?, 0x0014 = ?
-    this.ciSize = dv.getUint16(offset + 0x26);
+    this.flags = dv.getUint16(offset + 0x24);   // 0x4000 = need alpha?, 0x0014 = ?
+    this.texelsSize = dv.getUint16(offset + 0x26);
     this.unk28 = dv.getFloat32(offset + 0x28);  // animation interval?
     this.width = dv.getUint32(offset + 0x2C);
     this.height = dv.getUint32(offset + 0x30);
-    this.format = dv.getUint32(offset + 0x34); // 4 = ci4, 8 = ci8
+    this.bitDepth = dv.getUint32(offset + 0x34); // 4 = i4/ci4, 8 = i8/ci8
     this.unk38 = dv.getUint32(offset + 0x38);  // always 0
-    this.unk3C = dv.getUint32(offset + 0x3C);  // points to last 0x40 bytes of file?
+    this.unk3C = dv.getUint32(offset + 0x3C);  // points to last 0x40 bytes padding bytes of file?
 }
 
 TextureHeader.SIZE = 0x40;
 
-function MeshHeader(dv, offset)
+function MapPartitionHeader(dv, offset)
 {
-    this.signature = dv.getUint32(offset + 0x00);
+    this.signature = dv.getUint32(offset + 0x00); // SIG_MAP_PARTITION (0x3F)
     this.meshFileSize = dv.getUint32(offset + 0x004);
     // ...
     this.numSubMeshes = dv.getUint16(offset + 0x00C);
@@ -442,28 +454,21 @@ function MeshHeader(dv, offset)
     // ...
 }
 
-function SubMeshInfo(dv, offset) // Reference
+function MapSubMeshHeader(dv, offset)
 {
-    this.subMeshOffset = dv.getUint32(offset + 0x00);
-    this.subMeshSize = dv.getUint32(offset + 0x04);
-    this.unk08 = dv.getUint32(offset + 0x08);
-}
-
-function SubMeshHeader(dv, offset)
-{
-    this.magic       = dv.getUint32(offset + 0x00); // 0x0000003D
+    this.signature   = dv.getUint32(offset + 0x00); // SIG_MAP_SUBMESH (0x3D)
     this.size        = dv.getUint32(offset + 0x04);
     this.unk08       = dv.getUint32(offset + 0x08);
     this.numPackets  = dv.getUint16(offset + 0x0C);
-    this.numPackets2 = dv.getUint16(offset + 0x0E);
+    this.numPackets2 = dv.getUint16(offset + 0x0E); // always the same as numPackets?
     this.unk10       = dv.getUint16(offset + 0x10);
     this.textureFileIndex = dv.getUint16(offset + 0x12); // texture file index
     this.unk14       = dv.getUint32(offset + 0x14);
 }
 
-SubMeshHeader.SIZE = 0x18;
+MapSubMeshHeader.SIZE = 0x18;
 
-function SubMeshPacketHeader(dv, offset)
+function GeometryPacketHeader(dv, offset)
 {
     this.numTriangles = dv.getUint16(offset + 0x00);
     this.numVertices  = dv.getUint16(offset + 0x02);
@@ -471,41 +476,32 @@ function SubMeshPacketHeader(dv, offset)
     this.verticesSize = dv.getUint16(offset + 0x06);
 }
 
-SubMeshPacketHeader.SIZE = 8;
+GeometryPacketHeader.SIZE = 8;
 
 ////////////
 
-function ModelHeader(dv, offset)
+function ObjectModelHeader(dv, offset)
 {
-    this.signature = dv.getUint32(offset + 0x00); // 0x41
+    this.signature = dv.getUint32(offset + 0x00); // SIG_OBJECT_MODEL (0x41)
     this.size = dv.getUint32(offset + 0x04);
     this.unk08 = dv.getUint32(offset + 0x08);
     this.unk0C = dv.getUint32(offset + 0x0C);
     // u8 unk10[0x30] padding?
     this.unk40 = dv.getUint32(offset + 0x40);
-    this.offsCommands = dv.getUint32(offset + 0x44); // + 0x40 = offset of graph commands
+    this.offsRootNode = dv.getUint32(offset + 0x44); // + 0x40 = offset of graph commands
     // u8 unk48[0x18] padding?
     this.numTextures = dv.getUint32(offset + 0x60);
     this.unk64 = dv.getUint32(offset + 0x64);
 }
 
-ModelHeader.SIZE = 0x68;
+ObjectModelHeader.SIZE = 0x68;
 
-function Reference(dv, offset)
+function ModelNode13(dv, offset)
 {
-    this.offset = dv.getUint32(offset + 0x00);
-    this.size = dv.getUint32(offset + 0x04);
-    this.ptr = dv.getUint32(offset + 0x08);
-}
-
-Reference.SIZE = 0x0C;
-
-function Node13(dv, offset)
-{
-    this.signature = dv.getUint32(offset + 0x00); // 0x13
+    this.signature = dv.getUint32(offset + 0x00); // (0x13)
     this.size = dv.getUint32(offset + 0x04);
     this.marker = dv.getUint32(offset + 0x08);
-    this.numReferences = dv.getUint16(offset + 0x0C);
+    this.numChildren = dv.getUint16(offset + 0x0C);
     this.unk0E = dv.getUint16(offset + 0x0E);
     this.unk10 = dv.getUint32(offset + 0x10);
     this.unk14 = dv.getUint32(offset + 0x14);
@@ -521,15 +517,15 @@ function Node13(dv, offset)
     this.unk3C = dv.getUint32(offset + 0x3C);
 }
 
-Node13.SIZE = 0x40;
+ModelNode13.SIZE = 0x40;
 
-function Node12(dv, offset)
+function ModelNode12(dv, offset)
 {
     this.signature = dv.getUint32(offset + 0x00); // (0x12)
     this.size = dv.getUint32(offset + 0x04);
     this.marker = dv.getUint32(offset + 0x08);
     this.unk0C = dv.getUint32(offset + 0x0C); // looks like padding
-    this.numReferences = dv.getUint16(offset + 0x10);
+    this.numChildren = dv.getUint16(offset + 0x10);
     this.unk12 = dv.getUint16(offset + 0x12);
     this.unk14 = dv.getUint32(offset + 0x14);
     this.numUnkStructsA = dv.getUint16(offset + 0x18);
@@ -552,14 +548,14 @@ function Node12(dv, offset)
     this.unk54 = dv.getFloat32(offset + 0x54);
 }
 
-Node12.SIZE = 0x58;
+ModelNode12.SIZE = 0x58;
 
-function Node11(dv, offset)
+function ModelNode11(dv, offset)
 {
     this.signature = dv.getUint32(offset + 0x00); // (0x11)
     this.size = dv.getUint32(offset + 0x04);
     this.marker = dv.getUint32(offset + 0x08);
-    this.numReferences = dv.getUint16(offset + 0x0C);
+    this.numChildren = dv.getUint16(offset + 0x0C);
     this.unk0E = dv.getUint16(offset + 0x0E);
     this.unk10 = dv.getUint32(offset + 0x10);
     this.unk14 = dv.getUint32(offset + 0x14);
@@ -573,9 +569,9 @@ function Node11(dv, offset)
     this.unk34 = dv.getFloat32(offset + 0x34);
 }
 
-Node11.SIZE = 0x38;
+ModelNode11.SIZE = 0x38;
 
-function Node10(dv, offset)
+function ModelNode10(dv, offset)
 {
     this.signature = dv.getUint32(offset + 0x00); // (0x10)
     this.size = dv.getUint32(offset + 0x04);
@@ -591,24 +587,25 @@ function Node10(dv, offset)
     this.unk24 = dv.getFloat32(offset + 0x24);
 }
 
-Node10.SIZE = 0x28;
+ModelNode10.SIZE = 0x28;
 
 //////////////////
 
-function Item(dv, offset)
+function ItemPlacement(dv, offset)
 {
     this.x = dv.getFloat32(offset + 0x00);
     this.y = dv.getFloat32(offset + 0x04);
     this.z = dv.getFloat32(offset + 0x08);
-    this.id = dv.getFloat32(offset + 0x0C); // not sure why this is a float
+    this.itemId = dv.getFloat32(offset + 0x0C); // not sure why this is a float
 }
 
-Item.SIZE = 0x10;
+ItemPlacement.SIZE = 0x10;
 
 //////////////////
 
 function ObjectPlacement(dv, offset)
 {
+    // quaternion
     this.qX = dv.getFloat32(offset + 0x00); // q.x
     this.qY = dv.getFloat32(offset + 0x04); // q.y
     this.qZ = dv.getFloat32(offset + 0x08); // q.z
@@ -657,7 +654,7 @@ Triangle.SIZE = 0x02;
 
 function CollisionHeader(dv, offset)
 {
-    this.signature = dv.getUint32(offset + 0x00); // 0x0000003C
+    this.signature = dv.getUint32(offset + 0x00); // SIG_COLLISION (0x3C)
     this.size = dv.getUint32(offset + 0x04);
     this.unk08 = dv.getUint32(offset + 0x08);
     this.unk0C = dv.getUint16(offset + 0x0C);
@@ -677,7 +674,7 @@ CollisionGroupHeader.SIZE = 0x04;
 function CollisionTriangleListHeader(dv, offset)
 {
     this.offsVertices = dv.getUint16(offset + 0x00);
-    this.attributeId = dv.getUint8(offset + 0x02);
+    this.surfaceTypeId = dv.getUint8(offset + 0x02);
     this.numTriangles = dv.getUint8(offset + 0x03);
 }
 

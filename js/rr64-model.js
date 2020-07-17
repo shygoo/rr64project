@@ -1,196 +1,130 @@
-function RR64Model(dv, bDebug)
+function RR64ObjectModel(dv)
 {
     this.dv = dv;
-    var header = new ModelHeader(dv, 0x00);
-
-    this.positions = [];
-    this.colors = [];
-    this.uvs = [];
-    this.indices = [];
-
-    this.groups = {};
-
-    this.textureFileIndices= {};
+    this.header = new ObjectModelHeader(dv, 0x00);
     this.textures = [];
-    this.materials = [];
-
-    // collect textures
-    for(var i = 0; i < header.numTextures; i++)
+    this._textureFileIndices = {};
+    
+    for(var nTexture = 0; nTexture < this.header.numTextures; nTexture++)
     {
-        var offsRef = ModelHeader.SIZE + (i * Reference.SIZE);
-        var reference = new Reference(dv, offsRef);
+        var offsRef = ObjectModelHeader.SIZE + (nTexture * DataReference.SIZE);
+        var reference = new DataReference(dv, offsRef);
         var offsTextureFile = offsRef + reference.offset;
 
-        this.textureFileIndices[offsTextureFile] = i;
         var dvTexture = dvpart(this.dv, offsTextureFile, reference.size);
-        this.textures[i] = this.loadTexture(dvTexture);
+        var textureFile = RoadRash64.parseTextureFile(dvTexture);
+        this.textures.push(textureFile);
 
-        //console.log(textureHeader.fileName);
-        // todo handle 0x16/0x17 texture file
+        this._textureFileIndices[offsTextureFile] = nTexture;
     }
 
-    var offset = 0x40 + header.offsCommands;
-    this.processNode(offset);
-
-    //for(var texIndex in groups)
-    //{
-    //    
-    //}
+    this.rootNode = this._parseNode(0x40 + this.header.offsRootNode);
 }
 
-RR64Model.prototype.processNode = function(offset)
+RR64ObjectModel.prototype.traverseNodes = function(callback)
 {
-    var cmdSig = this.dv.getUint32(offset);
+    this._traverseNodes(this.rootNode, callback);
+}
 
-    switch(cmdSig)
+RR64ObjectModel.prototype._traverseNodes = function(node, callback)
+{
+    callback(node);
+
+    if(node.children)
     {
-    case 0x13: this.processNode13(offset); break;
-    case 0x12: this.processNode12(offset); break;
-    case 0x11: this.processNode11(offset); break;
-    case 0x10: this.processNode10(offset); break;
-    default: throw new Error('shit');
+        node.children.forEach(childNode => {
+            callback(childNode);
+            this._traverseNodes(childNode, callback);
+        });
     }
 }
 
-RR64Model.prototype.processNode13 = function(offset)
+RR64ObjectModel.prototype._parseNode = function(nodeOffset)
 {
-    var node = new Node13(this.dv, offset);
-    var offsRefTable = offset + Node13.SIZE;
+    var signature = this.dv.getUint32(nodeOffset);
 
-    //console.log(offset.hex(), 'node13', JSON.stringify(node));
-
-    for(var i = 0; i < node.numReferences; i++)
+    switch(signature)
     {
-        var offsRef = offsRefTable + Reference.SIZE * i;
-        var reference = new Reference(this.dv, offsRef);
+    case SIG_MODEL_NODE_13: return this._parseNode13(nodeOffset);
+    case SIG_MODEL_NODE_12: return this._parseNode12(nodeOffset);
+    case SIG_MODEL_NODE_11: return this._parseNode11(nodeOffset);
+    case SIG_MODEL_NODE_10: return this._parseNode10(nodeOffset);
+    default:
+        throw new Error('unhandled model node type');
+    }
+}
+
+RR64ObjectModel.prototype._parseNode13 = function(nodeOffset)
+{
+    var node = new ModelNode13(this.dv, nodeOffset);
+    var offsRefTable = nodeOffset + ModelNode13.SIZE;
+    var children = [];
+
+    for(var nChild = 0; nChild < node.numChildren; nChild++)
+    {
+        var offsRef = offsRefTable + DataReference.SIZE * nChild;
+        var reference = new DataReference(this.dv, offsRef);
 
         var offsCmd = offsRef + reference.offset;
-        this.processNode(offsCmd);
+        children.push(this._parseNode(offsCmd));
     }
+
+    return { node: node, children: children };
 }
 
-RR64Model.prototype.processNode12 = function(offset)
+RR64ObjectModel.prototype._parseNode12 = function(nodeOffset)
 {
-    var node = new Node12(this.dv, offset);
+    var node = new ModelNode12(this.dv, nodeOffset);
+    var children = [];
 
     // todo what are these structs for (animation?)
-    var offsStructsA = offset + Node12.SIZE;
+    var offsStructsA = nodeOffset + ModelNode12.SIZE;
     var offsStructsB = offsStructsA + (node.numUnkStructsA * 0x18);
     var offsRefTable = offsStructsB + (node.numUnkStructsB * 0x10);
 
-    //console.log('    ' + offset.hex(), 'node12', JSON.stringify(node));
-
-    for(var i = 0; i < node.numReferences; i++)
+    for(var nChild = 0; nChild < node.numChildren; nChild++)
     {
-        var offsRef = offsRefTable + Reference.SIZE * i
-        var reference = new Reference(this.dv, offsRef);
+        var offsRef = offsRefTable + DataReference.SIZE * nChild
+        var reference = new DataReference(this.dv, offsRef);
         var offsCmd = (offsRef + reference.offset) & 0xFFFF;
-        this.processNode(offsCmd);
+        children.push(this._parseNode(offsCmd));
     }
     
+    return { node: node, children: children };
 }
 
-RR64Model.prototype.processNode11 = function(offset)
+RR64ObjectModel.prototype._parseNode11 = function(nodeOffset)
 {
-    var node = new Node11(this.dv, offset);
-    var offsRefTable = offset + Node11.SIZE;
+    var node = new ModelNode11(this.dv, nodeOffset);
+    var offsRefTable = nodeOffset + ModelNode11.SIZE;
+    var children = [];
 
-    //console.log('        ' + offset.hex(), 'node11', JSON.stringify(node));
-
-    for(var i = 0; i < node.numReferences; i++)
+    for(var nChild = 0; nChild < node.numChildren; nChild++)
     {
-        var offsRef = offsRefTable + Reference.SIZE * i
-        var reference = new Reference(this.dv, offsRef);
+        var offsRef = offsRefTable + DataReference.SIZE * nChild
+        var reference = new DataReference(this.dv, offsRef);
         
         var offsCmd = offsRef + reference.offset;
-        this.processNode(offsCmd);
+        children.push(this._parseNode(offsCmd));
     }
+
+    return { node: node, children: children };
 }
 
-RR64Model.prototype.processNode10 = function(offset)
+RR64ObjectModel.prototype._parseNode10 = function(nodeOffset)
 {
-    var node = new Node10(this.dv, offset);
-    var packetOffset = offset + Node10.SIZE;
-    var dv = this.dv;
+    var node = new ModelNode10(this.dv, nodeOffset);
+    var texIndex = this._textureFileIndices[nodeOffset - node.offsTextureFile * 8];
+    var geometryPackets = [];
 
-    var texIndex = this.textureFileIndices[offset - node.offsTextureFile * 8];
-    var textureInfo = this.textures[texIndex];
-    var texWidth = textureInfo.width;
-    var texHeight = textureInfo.height;
+    var packetOffset = nodeOffset + ModelNode10.SIZE;
 
-    if(!this.groups[texIndex])
-    {
-        this.groups[texIndex] = {
-            positions: [],
-            uvs: [],
-            colors: [],
-            indices: []
-        };
-    }
-
-    var group = this.groups[texIndex];
-
-    // todo clean up code reuse
     for(var nPacket = 0; nPacket < node.numPackets; nPacket++)
     {
-        var indexBase = group.positions.length / 3;
-        var packetHeader = new SubMeshPacketHeader(dv, packetOffset);
-
-        //console.log('                ' + packetOffset.hex(), packetHeader);
-
-        var verticesOffset = packetOffset + SubMeshPacketHeader.SIZE;
-        var trianglesOffset = verticesOffset + packetHeader.verticesSize;
-
-        for(var nVertex = 0; nVertex < packetHeader.numVertices; nVertex++)
-        {
-            var offsVertex = verticesOffset + (nVertex * 16);
-            var vertex = new SPVertex(dv, offsVertex);
-
-            group.positions.push(-(vertex.x), vertex.z, vertex.y);
-            group.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
-            group.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
-        }
-
-        for(var nTri = 0; nTri < packetHeader.numTriangles; nTri++)
-        {
-            var offsTri = trianglesOffset + (nTri * 2);
-            var tri = dv.getUint16(offsTri);
-            var v0 = (tri >> 10) & 0x1F;
-            var v1 = (tri >>  5) & 0x1F;
-            var v2 = (tri >>  0) & 0x1F;
-            group.indices.push(indexBase + v0, indexBase + v1, indexBase + v2);
-            //console.log(indexBase, v0, v1, v2);
-        }
-
-        packetOffset += packetHeader.packetSize;
-    }
-}
-
-// todo cleanup repeated code
-RR64Model.prototype.loadTexture = function(dvTexture)
-{
-    // TODO handle animated textures
-    var textureHeader = new TextureHeader(dvTexture, 0);
-    var ciOffset = TextureHeader.SIZE;
-    var width = textureHeader.width;
-    var height = textureHeader.height;
-
-    var data = null;
-
-    if(textureHeader.format == TEX_FMT_CI4)
-    {
-        var tlutOffset = ciOffset + (width * height) / 2;
-        data = rgba32_texture_from_ci4(dvTexture, ciOffset, tlutOffset, width, height);
-    }
-    else if(textureHeader.format == TEX_FMT_CI8)
-    {
-        var tlutOffset = ciOffset + (width * height);
-        data = rgba32_texture_from_ci8(dvTexture, ciOffset, tlutOffset, width, height);
-    }
-    else
-    {
-        return null;
+        var packet = RoadRash64.parseGeometryPacket(this.dv, packetOffset);
+        geometryPackets.push(packet);
+        packetOffset += packet.header.packetSize;
     }
 
-    return { data: data, width: width, height: height, flags: textureHeader.unk24 };
+    return { node: node, texIndex: texIndex, geometryPackets: geometryPackets };
 }

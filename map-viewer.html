@@ -55,6 +55,8 @@ body, html {
 <div id="container"></div>
 <script>
 
+"use strict";
+
 var viewer = null;
 
 function Viewer(queryDomContainer)
@@ -75,10 +77,6 @@ function Viewer(queryDomContainer)
     this.dom['container'] = document.querySelector(queryDomContainer);
     this.dom['container'].appendChild(this.hud.domElement);
     this.dom['container'].appendChild(this.renderer.domElement);
-
-    this.dvRom = null;
-    this.dvGfx = null;
-    this.dvTransforms = null;
 
     this.keysDown = {};
 
@@ -198,7 +196,7 @@ function Viewer(queryDomContainer)
 
     window.addEventListener('resize', function(e)
     {
-        if(!_this.dvRom)
+        if(!_this.camera || !_this.renderer)
         {
             return;
         }
@@ -245,16 +243,20 @@ function Viewer(queryDomContainer)
         this.renderer.setPixelRatio(window.devicePixelRatio * (checked ? 0.5 : 1));
     });
 
-    this.hud.addCheckbox("Show objects", (checked) => {
-        this.setLayerVisible('solid_objects', checked);
+    this.hud.addCheckbox("Show main mesh", (checked) => {
+        this.layers['main_mesh'].setVisible(checked);
     }, true);
 
-    this.hud.addCheckbox("Show main mesh", (checked) => {
-        this.setLayerVisible('main_mesh', checked);
+    this.hud.addCheckbox("Show objects", (checked) => {
+        this.layers['solid_objects'].setVisible(checked);
+    }, true);
+
+    this.hud.addCheckbox("Show items", (checked) => {
+        this.layers['items'].setVisible(checked);
     }, true);
 
     this.hud.addCheckbox("Show collision", (checked) => {
-        this.setLayerVisible('collision', checked);
+        this.layers['collision'].setVisible(checked);
     });
 
     this.hud.addCheckbox("Wireframe", (checked) => {
@@ -266,7 +268,7 @@ function Viewer(queryDomContainer)
 
 Viewer.prototype.registerLayer = function(name, label)
 {
-    this.layers[name] = { label: label, objects: [] };
+    this.layers[name] = new ViewerLayer(this, name, label);
 }
 
 Viewer.prototype.animate = function()
@@ -296,82 +298,173 @@ Viewer.prototype.animate = function()
     requestAnimationFrame(this.animate.bind(this));
 }
 
-Viewer.prototype.sceneAdd = function(layerName, objects)
+function createInstancedMeshFromObjectModel(objectModel, count)
 {
-    for(var i in objects)
+    var geometry = new THREE.BufferGeometry();
+    var groups = [];
+
+    var positions = [];
+    var colors = [];
+    var uvs = [];
+    var indices = [];
+    var materials = [];
+
+    for(var texIndex in objectModel.textures)
     {
-        this.scene.add(objects[i]);
-        this.layers[layerName].objects.push(objects[i]);
-    }
-}
+        var textureFile = objectModel.textures[texIndex];
+        
+        var dataTexture = new THREE.DataTexture(textureFile.data, textureFile.width, textureFile.height, THREE.RGBAFormat);
+        dataTexture.wrapS = THREE.RepeatWrapping;
+        dataTexture.wrapT = THREE.RepeatWrapping;
+        dataTexture.magFilter = THREE.LinearFilter;
+        
+        var material = new THREE.MeshBasicMaterial({
+            side: THREE.BackSide,
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1,
+            map: dataTexture,
+            transparent: !!(textureFile.flags & 0x4000)
+        });
 
-Viewer.prototype.setLayerVisible = function(layerName, visible)
-{
-    if(typeof this.layers[layerName] == 'undefined')
-    {
-        return;
-    }
-
-    this.layers[layerName].objects.forEach(object => {
-        object.visible = visible
-    });
-}
-
-Viewer.prototype.loadMap = function()
-{
-    while(this.scene.children.length > 0)
-    {
-        this.scene.remove(this.scene.children[0]); 
-    }
-
-    this.textureFiles = [];
-
-    this.groups = {};
-    this.materials = [];
-
-    var defaultMaterial = new THREE.MeshBasicMaterial({
-        color: 0xFF0000
-    });
-
-    // collect textures
-    for(var i = 0; i < NUM_MAP_MODELS; i++)
-    {
-        // 0x18 = file system header size
-        var entryOffset = RA_MAP_MODEL_TABLE + 0x18 + (i * FileEntry.SIZE);
-        var fileEntry = new FileEntry(this.dvRom, entryOffset)
-
-        if(fileEntry.offset == 0)
+        if(material.transparent)
         {
-            this.textureFiles.push(null);
-            continue;
-        }
-
-        var fileAddress = fileEntry.offset + entryOffset;
-        var signature = this.dvRom.getUint32(fileAddress + 0x00);
-        var dvFile = dvpart(this.dvRom, fileAddress, fileEntry.size)
-
-        if(signature == SIG_TEXTURE || signature == SIG_ANIM_TEXTURE)
-        {
-            var textureFile = this.loadTexture(dvFile);
-            this.textureFiles.push(textureFile);
-        }
-        else
-        {
-            this.textureFiles.push(null);
-        }
-    }
-
-    // create material for each texture
-    for(var i = 0; i < NUM_MAP_MODELS; i++)
-    {
-        var textureFile = this.textureFiles[i];
-
-        if(textureFile == null)
-        {
-            this.materials[i] = defaultMaterial;
-            continue;
+            material.alphaTest = 0.3;
         }
         
+        materials.push(material);
+    }
+
+    objectModel.traverseNodes(node => {
+        if(node.node.signature != 0x10)
+        {
+            return;
+        }
+
+        var texIndex = node.texIndex;
+        var textureFile = objectModel.textures[texIndex];
+        var texWidth = textureFile ? textureFile.width : 1;
+        var texHeight = textureFile ? textureFile.height : 1;
+
+        if(typeof groups[texIndex] == 'undefined')
+        {
+            groups[texIndex] = {
+                positions: [],
+                uvs: [],
+                colors: [],
+                indices: []
+            };
+        }
+
+        var group = groups[texIndex];
+
+        node.geometryPackets.forEach(packet => {
+            var groupIndexBase = group.positions.length / 3;
+
+            packet.vertices.forEach(vertex => {
+                group.positions.push(-(vertex.x), (vertex.z), (vertex.y));
+                // todo normals
+                group.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
+            });
+
+            packet.triangles.forEach(triangle => {
+                group.indices.push(groupIndexBase + triangle.v0, groupIndexBase + triangle.v1, groupIndexBase + triangle.v2);
+            });
+        });
+    });
+
+    for(var texIndex in groups)
+    {
+        var group = groups[texIndex];
+        var start = indices.length;
+        var numTriangles = group.indices.length;
+        var indexBase = positions.length / 3;
+        for(var i in group.positions) positions.push(group.positions[i]);
+        for(var i in group.colors) colors.push(group.colors[i]);
+        for(var i in group.uvs) uvs.push(group.uvs[i]);
+        for(var i in group.indices) indices.push(indexBase + group.indices[i]);
+        geometry.addGroup(start, numTriangles, texIndex);
+    }
+    
+    var fPositions = new Float32Array(positions);
+    var fUVs = new Float32Array(uvs);
+    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(fUVs, 2));
+    geometry.setIndex(indices);
+    var mesh = new THREE.InstancedMesh(geometry, materials, count);
+    return mesh;
+}
+
+Viewer.prototype.addObjects = function()
+{
+    // group placements by model id
+    var instances = {};
+
+    for(var nObjectPlacement in this.rr64.objectPlacements)
+    {
+        var objectPlacement = this.rr64.objectPlacements[nObjectPlacement];
+        var objectDefinition = this.rr64.objectDefinitions[objectPlacement.objectIndex];
+
+        var modelIndex = this.rr64.getModelIndex(objectDefinition.modelId_hi, objectDefinition.modelId_lo);
+
+        if(!instances[modelIndex])
+        {
+            instances[modelIndex] = [];
+        }
+
+        instances[modelIndex].push(objectPlacement);
+    }
+
+    for(var modelIndex in instances)
+    {
+        var objectPlacements = instances[modelIndex];
+        var objectModel = this.rr64.objectModels[modelIndex];
+
+        var instancedMesh = createInstancedMeshFromObjectModel(objectModel, objectPlacements.length);
+        
+        for(var nObjectPlacement in objectPlacements)
+        {
+            var p = objectPlacements[nObjectPlacement];
+            var position = new THREE.Vector3(-p.posX * 4, p.posZ * 4, p.posY * 4);
+            var quaternion = new THREE.Quaternion(p.qX, p.qZ, p.qY, p.qW);
+            var scale = new THREE.Vector3(0.5, 0.5, 0.5);
+            var matrix = new THREE.Matrix4();
+            matrix.compose(position, quaternion, scale);
+
+            instancedMesh.setMatrixAt(nObjectPlacement, matrix);
+        }
+
+        this.layers['solid_objects'].add(instancedMesh);
+    }
+}
+
+Viewer.prototype.addMap = function()
+{
+    var mapMaterials = [];
+    var mapGroups = {};
+    var mapPositions = [];
+    var mapColors = [];
+    var mapUVs = [];
+    var mapIndices = [];
+
+    var mapGeometry = new THREE.BufferGeometry();
+
+    var defaultMaterial = new THREE.MeshBasicMaterial({
+        color: 0xFF0000,
+        side: THREE.DoubleSide,
+    });
+
+    // build map material array
+    for(var nMapTexture in this.rr64.mapTextures)
+    {
+        if(typeof this.rr64.mapTextures[nMapTexture] == 'undefined')
+        {
+            mapMaterials.push(defaultMaterial);
+            continue;
+        }
+
+        var textureFile = this.rr64.mapTextures[nMapTexture];
+
         var dataTexture = new THREE.DataTexture(
             textureFile.data,
             textureFile.width,
@@ -382,7 +475,7 @@ Viewer.prototype.loadMap = function()
         dataTexture.wrapT = THREE.RepeatWrapping;
         dataTexture.magFilter = THREE.LinearFilter;
 
-        this.materials[i] = new THREE.MeshBasicMaterial({
+        var material = new THREE.MeshBasicMaterial({
             vertexColors: THREE.VertexColors,
             side: THREE.BackSide,
             polygonOffset: true,
@@ -392,429 +485,155 @@ Viewer.prototype.loadMap = function()
             transparent: !!(textureFile.flags & 0x4000),
             alphaTest: 0.3
         });
+
+        mapMaterials.push(material);
     }
 
-    for(var i = 0; i < NUM_MAP_MODELS; i++)
+    // build map mesh, sort submeshes with similar materials into groups
+    for(var nMapPartition in this.rr64.mapPartitions)
     {
-        // 0x18 = file system header size
-        var entryOffset = RA_MAP_MODEL_TABLE + 0x18 + (i * FileEntry.SIZE);
-        var fileEntry = new FileEntry(this.dvRom, entryOffset)
+        var mapPartition = this.rr64.mapPartitions[nMapPartition];
 
-        if(fileEntry.offset == 0)
+        var worldX = mapPartition.header.worldX;
+        var worldY = mapPartition.header.worldY;
+        var worldZ = mapPartition.header.worldZ;
+
+        for(var nSubMesh in mapPartition.subMeshes)
         {
-            continue;
-        }
+            var subMesh = mapPartition.subMeshes[nSubMesh];
+            var textureFile = this.rr64.mapTextures[subMesh.header.textureFileIndex];
 
-        var fileAddress = fileEntry.offset + entryOffset;
-        var signature = this.dvRom.getUint32(fileAddress + 0x00);
-        var dvFile = dvpart(this.dvRom, fileAddress, fileEntry.size)
+            if(!textureFile)
+            {
+                console.log("texture undefined; nMapPartition:", nMapPartition, "nSubMesh:", nSubMesh);
+            }
 
-        if(signature == SIG_MESH) // mesh file
-        {
-            this.loadMesh(dvFile);
+            var texWidth = textureFile ? textureFile.width : 1;
+            var texHeight = textureFile ? textureFile.height : 1;
+
+            if(typeof mapGroups[subMesh.header.textureFileIndex] == 'undefined')
+            {
+                mapGroups[subMesh.header.textureFileIndex] = {
+                    positions: [],
+                    uvs: [],
+                    colors: [],
+                    indices: []
+                };
+            }
+
+            var group = mapGroups[subMesh.header.textureFileIndex];
+
+            subMesh.geometryPackets.forEach(packet => {
+                var groupIndexBase = group.positions.length / 3;
+
+                packet.vertices.forEach(vertex => {
+                    group.positions.push(-(vertex.x + worldX), (vertex.z + worldZ) / 2, (vertex.y + worldY));
+                    group.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
+                    group.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
+                });
+
+                packet.triangles.forEach(triangle => {
+                    group.indices.push(groupIndexBase + triangle.v0, groupIndexBase + triangle.v1, groupIndexBase + triangle.v2);
+                });
+            });
         }
     }
 
-    var geometry = new THREE.BufferGeometry();
-
-    var positions = [];
-    var colors = [];
-    var uvs = [];
-    var indices = [];
-
-    for(var texIndex in this.groups)
+    // flatten groups
+    for(var materialIndex in mapGroups)
     {
-        var group = this.groups[texIndex];
-
-        var start = indices.length;
+        var group = mapGroups[materialIndex];
+        var start = mapIndices.length;
         var count = group.indices.length;
 
-        var indexBase = positions.length / 3;
+        var indexBase = mapPositions.length / 3;
 
-        for(var i in group.positions) positions.push(group.positions[i]);
-        for(var i in group.colors) colors.push(group.colors[i]);
-        for(var i in group.uvs) uvs.push(group.uvs[i]);
-        for(var i in group.indices) indices.push(indexBase + group.indices[i]);
+        group.positions.forEach(n => mapPositions.push(n));
+        group.colors.forEach(n => mapColors.push(n));
+        group.uvs.forEach(n => mapUVs.push(n));
+        group.indices.forEach(n => mapIndices.push(indexBase + n));
 
-        geometry.addGroup(start, count, texIndex);
+        mapGeometry.addGroup(start, count, materialIndex);
     }
+
+    var fMapPositions = new Float32Array(mapPositions);
+    var fMapColors = new Float32Array(mapColors);
+    var fMapUVs = new Float32Array(mapUVs);
     
-    var fPositions = new Float32Array(positions);
-    var fColors = new Float32Array(colors);
-    var fUVs = new Float32Array(uvs);
+    mapGeometry.setAttribute('position', new THREE.BufferAttribute(fMapPositions, 3));
+    mapGeometry.setAttribute('color', new THREE.BufferAttribute(fMapColors, 3));
+    mapGeometry.setAttribute('uv', new THREE.BufferAttribute(fMapUVs, 2));
+    mapGeometry.setIndex(mapIndices);
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(fUVs, 2));
-    geometry.setIndex(indices);
-
-    var mesh = new THREE.Mesh(geometry, this.materials);
-
-    this.sceneAdd('main_mesh', [ mesh ]);
-
-    this.addAllItems();
-    this.addAllSolidObjects();
+    var mesh = new THREE.Mesh(mapGeometry, mapMaterials)
+    //this.sceneAdd('main_mesh', [ mesh ]);
+    this.layers['main_mesh'].add(mesh);
 }
 
-Viewer.prototype.addAllItems = function()
+Viewer.prototype.addItems = function()
 {
-    // load item textures
-    // todo should technically use the table at 0x01E09368 for this
     var materials = [];
-    var raItemTexture = 0x01F49730;
+    var sprites = [];
 
-    for(var i = 0; i < 16; i++)
-    {
-        var data = rgba32_texture_from_i8(this.dvRom, raItemTexture, 64, 64);
+    this.rr64.itemTextures.forEach(data => {
         var dataTexture = new THREE.DataTexture(data, 64, 64, THREE.RGBAFormat);
-        dataTexture.magFilter = THREE.LinearFilter;
         var material = new THREE.SpriteMaterial({ map: dataTexture, color: 0xFF0000 });
         materials.push(material);
-        raItemTexture += 0x1000;
-    }
+    });
 
-    // todo where is this defined
-    const itemMatIndices = [
-        null, 0x0D, 0x0E, 0x0F, 0x0C, 0x06, 0x00, 0x02,
-        0x05, 0x09, 0x08, 0x01, 0x03, 0x0B, 0x0A, 0x07,
-        0x04
-    ];
-
-    var meshes = [];
-    var numItems = this.dvRom.getUint32(RA_ITEM_COUNT);
-
-    for(var nItem = 0; nItem < numItems; nItem++)
-    {
-        var raItem = RA_ITEM_TABLE + nItem * Item.SIZE;
-        var item = new Item(this.dvRom, raItem);
-
-        var sprite = new THREE.Sprite(materials[itemMatIndices[item.id]]);
+    this.rr64.itemPlacements.forEach(item => {
+        var sprite = new THREE.Sprite(materials[ITEM_TEX_INDICES[item.itemId]]);
         sprite.position.set(-item.x * 4, item.z * 4, item.y * 4);
         sprite.scale.set(15, 15, 15);
-        meshes.push(sprite);
-    }
-    
-    this.sceneAdd('items', meshes);
-}
+        sprites.push(sprite);
+    });
 
-Viewer.prototype.getModelIndex = function(modelId_hi, modelId_lo)
-{
-    var indexBase = 0;
-    for(var i = 0; i < modelId_hi; i++)
-    {
-        indexBase += this.dvRom.getUint32(RA_MODEL_CATEGORY_INDICES + i * 4);
-    }
-
-    return indexBase + modelId_lo;
-}
-
-Viewer.prototype.addAllSolidObjects = function()
-{
-    var modelInstances = {};
-
-    for(var nFile = 0; nFile < NUM_PLACEMENT_FILES; nFile++)
-    {
-        var entryOffset = nFile * 4;
-        var offset = this.dvRom.getUint32(RA_OBJECT_PLACEMENT_TABLE + entryOffset);
-
-        if(offset == 0)
-        {
-            continue;
-        }
-
-        var raFile = RA_OBJECT_PLACEMENT_TABLE + entryOffset + offset;
-        var numPlacements = this.dvRom.getUint32(raFile);
-
-        for(var nPlacement = 0; nPlacement < numPlacements; nPlacement++)
-        {
-            var raPlacement = raFile + 0x88 + nPlacement * ObjectPlacement.SIZE;
-            var placement = new ObjectPlacement(this.dvRom, raPlacement);
-            var objectDef = new ObjectDefinition(this.dvRom, RA_OBJECT_DEFINITION_TABLE + placement.objectIndex * ObjectDefinition.SIZE);
-
-            var modelIndex = this.getModelIndex(objectDef.modelId_hi, objectDef.modelId_lo);
-
-            if(!modelInstances[modelIndex])
-            {
-                modelInstances[modelIndex] = [];
-            }
-
-            modelInstances[modelIndex].push(placement);
-        }
-    }
-
-    for(modelIndex in modelInstances)
-    {
-        //var count = modelInstances[modelIndex].length;
-        var placements = modelInstances[modelIndex];
-
-        var instancedMesh = this.createInstancedModel(modelIndex, placements.length);
-
-        for(var i = 0; i < placements.length; i++)
-        {
-            var p = placements[i];
-            var position = new THREE.Vector3(-p.posX * 4, p.posZ * 4, p.posY * 4);
-            var quaternion = new THREE.Quaternion(p.qX, p.qZ, p.qY, p.qW);
-            var scale = new THREE.Vector3(0.5, 0.5, 0.5);
-            var matrix = new THREE.Matrix4();
-            matrix.compose(position, quaternion, scale);
-
-            instancedMesh.setMatrixAt(i, matrix);
-        }
-
-        this.sceneAdd('solid_objects', [ instancedMesh ]);
-    }
-}
-
-Viewer.prototype.loadTexture = function(dvTexture)
-{
-    // TODO handle animated textures
-    var textureHeader = new TextureHeader(dvTexture, 0);
-    var ciOffset = TextureHeader.SIZE;
-    var width = textureHeader.width;
-    var height = textureHeader.height;
-
-    var data = null;
-
-    if(textureHeader.format == TEX_FMT_CI4)
-    {
-        var tlutOffset = ciOffset + (width * height) / 2;
-        data = rgba32_texture_from_ci4(dvTexture, ciOffset, tlutOffset, width, height);
-    }
-    else if(textureHeader.format == TEX_FMT_CI8)
-    {
-        var tlutOffset = ciOffset + (width * height);
-        data = rgba32_texture_from_ci8(dvTexture, ciOffset, tlutOffset, width, height);
-    }
-    else
-    {
-        return null;
-    }
-
-    return { data: data, width: width, height: height, flags: textureHeader.unk24 };
-}
-
-Viewer.prototype.loadMesh = function(dvMesh)
-{
-    var meshHeader = new MeshHeader(dvMesh, 0);
-
-    for(var nSubMesh = 0; nSubMesh < meshHeader.numSubMeshes; nSubMesh++)
-    {
-        var entryOffset = 0xF0 + (nSubMesh * 12);
-        var subMeshInfo = new SubMeshInfo(dvMesh, entryOffset);
-        var dvSubMesh = dvpart(dvMesh, subMeshInfo.subMeshOffset + entryOffset, subMeshInfo.subMeshSize);
-        this.addSubMesh(dvSubMesh, meshHeader.worldX, meshHeader.worldY, meshHeader.worldZ);
-    }
-
-    // collision
-    // todo optimize
-
-    var collisionGeometry = new THREE.BufferGeometry();
-    var collisionPositions = [];
-    var collisionColors = [];
-
-    const surfaceTypeColors = [
-        /*00*/ null,
-        /*01*/ [1, 0, 0],
-        /*02*/ [0, 1, 0],
-        /*03*/ [0, 0, 1],
-        /*04*/ [1, 1, 0],
-        /*05*/ [1, 0, 1],
-        /*06*/ [0, 1, 1],
-        /*07*/ [1, 1, 1],
-        /*08*/ [0.5, 0, 0],
-        /*09*/ [0, 0.5, 0],
-        /*0A*/ [0, 0, 0.5],
-        /*0B*/ [0.5, 0.5, 0],
-        /*0C*/ [0.5, 0, 0.5],
-        /*0D*/ [0, 0.5, 0.5],
-        /*0E*/ [0.5, 0.5, 0.5]
-    ];
-
-    var collisionHeader = new CollisionHeader(dvMesh, meshHeader.offsCollision);
-    for(var nGroup = 0; nGroup < collisionHeader.numGroups; nGroup++)
-    {
-        var offsCollisionGroup = dvMesh.getUint16(meshHeader.offsCollision + CollisionHeader.SIZE + nGroup * 2);
-        var groupHeader = new CollisionGroupHeader(dvMesh, meshHeader.offsCollision + offsCollisionGroup);
-        var offsTriangleList = meshHeader.offsCollision + offsCollisionGroup + CollisionGroupHeader.SIZE;
-
-        for(var nList = 0; nList < groupHeader.numTriangleLists; nList++)
-        {
-            var triangleListHeader = new CollisionTriangleListHeader(dvMesh, offsTriangleList);
-            offsTriangleList += CollisionTriangleListHeader.SIZE;
-
-            var color = surfaceTypeColors[triangleListHeader.attributeId];
-
-            for(var nTri = 0; nTri < triangleListHeader.numTriangles; nTri++)
-            {
-                var tri = new Triangle(dvMesh, offsTriangleList);
-                offsTriangleList += Triangle.SIZE;
-
-                var vertex0 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v0 * SPVertex.SIZE);
-                var vertex1 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v1 * SPVertex.SIZE);
-                var vertex2 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v2 * SPVertex.SIZE);
-
-                
-
-                collisionPositions.push(-(meshHeader.worldX + vertex0.x), (meshHeader.worldZ + vertex0.z) / 2, (meshHeader.worldY + vertex0.y));
-                collisionPositions.push(-(meshHeader.worldX + vertex1.x), (meshHeader.worldZ + vertex1.z) / 2, (meshHeader.worldY + vertex1.y));
-                collisionPositions.push(-(meshHeader.worldX + vertex2.x), (meshHeader.worldZ + vertex2.z) / 2, (meshHeader.worldY + vertex2.y));
-
-                collisionColors.push(color[0], color[1], color[2]);
-                collisionColors.push(color[0], color[1], color[2]);
-                collisionColors.push(color[0], color[1], color[2]);
-            }
-
-            if((offsTriangleList % 4) != 0) offsTriangleList += 2;
-        }
-    }
-
-    var fCollisionPositions = new Float32Array(collisionPositions);
-    var fCollisionColors = new Float32Array(collisionColors);
-    collisionGeometry.setAttribute('position', new THREE.BufferAttribute(fCollisionPositions, 3));
-    collisionGeometry.setAttribute('color', new THREE.BufferAttribute(fCollisionColors, 3));
-    var material = new THREE.MeshBasicMaterial({ wireframe: true, vertexColors: THREE.VertexColors });
-    var collisionMesh = new THREE.Mesh(collisionGeometry, material);
-    this.sceneAdd('collision', [ collisionMesh ]);
-}
-
-Viewer.prototype.addSubMesh = function(dv, worldX, worldY, worldZ)
-{
-    var subMeshHeader = new SubMeshHeader(dv, 0x00);
-    var packetOffset = SubMeshHeader.SIZE;
-
-    var texIndex = subMeshHeader.textureFileIndex;
-
-    if(!this.groups[texIndex])
-    {
-        this.groups[texIndex] = {
-            positions: [],
-            uvs: [],
-            colors: [],
-            indices: []
-        }
-    }
-
-    var group = this.groups[texIndex];
-
-    var material = this.materials[subMeshHeader.textureFileIndex];
-    var texWidth = material ? material.map.image.width : 1;
-    var texHeight = material ? material.map.image.height : 1;
-
-    for(var nPacket = 0; nPacket < subMeshHeader.numPackets; nPacket++)
-    {
-        var pktHeader = new SubMeshPacketHeader(dv, packetOffset);
-
-        var verticesOffset = packetOffset + SubMeshPacketHeader.SIZE;
-        var trianglesOffset = verticesOffset + pktHeader.verticesSize;
-
-        var indexBase = group.positions.length / 3;
-
-        for(var nVertex = 0; nVertex < pktHeader.numVertices; nVertex++)
-        {
-            var offset = verticesOffset + (nVertex * 16);
-            var vertex = new SPVertex(dv, offset);
-            group.positions.push(-(vertex.x + worldX), (vertex.z + worldZ) / 2, (vertex.y + worldY));
-            group.colors.push(vertex.r / 0xFF, vertex.g / 0xFF, vertex.b / 0xFF);
-            group.uvs.push((vertex.s / 32) / texWidth / 2, (vertex.t / 32) / texHeight / 2);
-        }
-
-        for(var nTri = 0; nTri < pktHeader.numTriangles; nTri++)
-        {
-            var offset = trianglesOffset + (nTri * Triangle.SIZE);
-            var tri = new Triangle(dv, offset);
-            group.indices.push(indexBase + tri.v0, indexBase + tri.v1, indexBase + tri.v2);
-        }
-
-        packetOffset += pktHeader.packetSize;
-    }
-}
-
-Viewer.prototype.createInstancedModel = function(modelIndex, count)
-{
-    var offsRef = RA_MODEL_TABLE + modelIndex * Reference.SIZE;
-    var modelReference = new Reference(this.dvRom, offsRef);
-    var raModelFile = offsRef + modelReference.offset;
-
-    if(modelIndex >= NUM_MODELS || modelIndex < 0)
-    {
-        return;
-    }
-
-    var dvModelFile = dvpart(this.dvRom, raModelFile, modelReference.size);
-    var model = new RR64Model(dvModelFile);
-    
-    var geometry = new THREE.BufferGeometry();
-
-    var positions = [];
-    var colors = [];
-    var uvs = [];
-    var indices = [];
-    var materials = [];
-
-    for(var texIndex in model.textures)
-    {
-        var textureFile = model.textures[texIndex];
-
-        var dataTexture = new THREE.DataTexture(textureFile.data, textureFile.width, textureFile.height, THREE.RGBAFormat);
-        dataTexture.wrapS = THREE.RepeatWrapping;
-        dataTexture.wrapT = THREE.RepeatWrapping;
-        dataTexture.magFilter = THREE.LinearFilter;
-
-        var material = new THREE.MeshBasicMaterial({
-            //vertexColors: THREE.VertexColors,
-            side: THREE.BackSide,
-            polygonOffset: true,
-            polygonOffsetFactor: 1,
-            polygonOffsetUnits: 1,
-            map: dataTexture,
-            transparent: !!(textureFile.flags & 0x4000),
-            alphaTest: 0.3
-        });
-
-        materials.push(material);
-    }
-
-    for(var texIndex in model.groups)
-    {
-        var group = model.groups[texIndex];
-
-        var start = indices.length;
-        var numTriangles = group.indices.length;
-
-        var indexBase = positions.length / 3;
-
-        for(var i in group.positions) positions.push(group.positions[i]);
-        for(var i in group.colors) colors.push(group.colors[i]);
-        for(var i in group.uvs) uvs.push(group.uvs[i]);
-        for(var i in group.indices) indices.push(indexBase + group.indices[i]);
-
-        geometry.addGroup(start, numTriangles, texIndex);
-    }
-    
-    var fPositions = new Float32Array(positions);
-    //var fColors = new Float32Array(colors);
-    var fUVs = new Float32Array(uvs);
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
-    //geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(fUVs, 2));
-    geometry.setIndex(indices);
-
-    var mesh = new THREE.InstancedMesh(geometry, materials, count);
-
-    return mesh;
+    //this.sceneAdd('items', sprites);
+    this.layers['items'].add(sprites);
 }
 
 Viewer.prototype.loadRom = function(abRom)
 {
-    this.abRom = abRom;
-    this.dvRom = new DataView(abRom);
+    this.rr64 = new RoadRash64(new DataView(abRom));
 
-    var rr64 = new RoadRash64(this.dvRom);
-    console.log(rr64);
+    this.addMap();
+    this.addItems();
+    this.addObjects();
 
-    this.loadMap();
-    this.setLayerVisible('collision', false);
+    this.layers['collision'].setVisible(false);
+}
+
+//////////////////////////////////////////////////
+
+function ViewerLayer(viewer, name, label)
+{
+    this.name = name;
+    this.label = label;
+    this.viewer = viewer;
+    this.objects = [];
+}
+
+ViewerLayer.prototype.add = function(objects)
+{
+    if(Array.isArray(objects))
+    {
+        objects.forEach(object => {
+            this.objects.push(object);
+            this.viewer.scene.add(object)
+        });
+    }
+    else
+    {
+        this.objects.push(objects);
+        this.viewer.scene.add(objects);
+    }
+}
+
+ViewerLayer.prototype.setVisible = function(bVisible)
+{
+    this.objects.forEach(object => {
+        object.visible = bVisible;
+    });
 }
 
 //////////////////////////////////////////////////
