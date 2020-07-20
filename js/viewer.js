@@ -173,7 +173,7 @@ Viewer.prototype.layer = function(name)
 {
     if(typeof this.layers[name] == 'undefined')
     {
-        this.layers[name] = new Viewer.Layer(this, name, label);
+        this.layers[name] = new Viewer.Layer(this, name);
     }
 
     return this.layers[name];
