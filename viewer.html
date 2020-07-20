@@ -1,0 +1,213 @@
+<html>
+<head>
+<meta charset="utf-8">
+<title>Road Rash 64 Viewer</title>
+<link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+<style>
+label
+{
+    user-select: none;
+}
+
+body, input, button, label, select
+{
+    font-family: "Open Sans";
+}
+
+select
+{
+    padding: 1px 6px;
+}
+
+body, html {
+    height: 100%;
+    background: #222;
+    color: #FFF;
+    margin: 0px;
+}
+</style>
+<script src="js/three.js"></script>
+<script src="js/viewer.js"></script>
+<script src="js/rr64.js"></script>
+<script src="js/rr64-model.js"></script>
+<script src="js/rr64-to-three.js"></script>
+<script src="js/texture.js"></script>
+<script src="js/util.js"></script>
+</head>
+<body>
+<div id="info" style="text-align: center; width: 100%; height: 100%; display: flex; flex-direction: column;">
+    <div style="flex: 1;"></div>
+    <div id="info-text" style="display: inline-block; padding: 10px; text-align: left; margin: auto; flex: 1; flex-grow: 0;">
+        <div style="padding: 10px; font-size: 24px;">Road Rash 64 Map Viewer</div>
+        <div style="padding: 10px;">Drag and drop a Road Rash 64 (U).z64 ROM onto<br>this page or click the choose file button below.</div>
+        <div style="padding: 10px;"><input type="file" id="file"></div>
+        <div style="padding: 10px;">
+            Controls:
+            <ul>
+                <li>WASD - Move camera</li>
+                <li>XZ - Move camera up/down</li>
+                <li>L-Mouse - Pan camera</li>
+                <li>R-Mouse - Rotate camera</li>
+                <li>Mouse wheel - Adjust camera speed</li>
+            </ul>
+        </div>
+    </div>
+    <div style="flex:1;"></div>
+</div>
+<div id="container"></div>
+<script>
+
+var viewer = null;
+var rr64 = null;
+
+attachFileReader('#file', onromloaded, onromloading)
+attachDropZone('body', onromloaded, onromloading);
+
+function onromloaded(ab)
+{
+    document.querySelector('#info').style.display = "none";
+    
+    var config = {
+        cameraNear: 1,
+        cameraFar: 80000,
+        fogNear: 1,
+        fogFar: 5000,
+        fogColor: 0x7B8CCE,
+        clearColor: 0x7B8CCE,
+        cameraDefaultX: 0,
+        cameraDefaultY: 4000,
+        cameraDefaultZ: 0,
+        cameraSpeed: 30
+    };
+
+    rr64 = new RoadRash64(new DataView(ab));
+    viewer = new Viewer('#container', config);
+    viewer.animate();
+    
+    setupViewerHUD();
+    buildScene();
+}
+
+function onromloading()
+{
+    document.querySelector('#info-text').innerHTML = "Loading...";
+}
+
+function setupViewerHUD()
+{
+    var modeOptions = [ "Map viewer", "Model viewer" ];
+
+    viewer.hud.addSelect('mode', 'Mode', modeOptions, selection =>
+    {
+        var bMapViewer = (selection.value == "Map viewer");
+        var bModelViewer = (selection.value == "Model viewer");
+
+        if(bModelViewer)
+        {
+            viewer.camera.position.set(-9400, 3200, 0);
+            viewer.camera.lookAt(0, 0, 0);
+        }
+
+        var bShowMainMeshChecked = viewer.hud.getItemValue('show_main_mesh');
+        var bShowObjectsChecked = viewer.hud.getItemValue('show_objects');
+        var bShowItemsChecked = viewer.hud.getItemValue('show_items');
+        var bShowCollisionChecked = viewer.hud.getItemValue('show_collision');
+
+        viewer.hud.setItemVisible('show_main_mesh', bMapViewer);
+        viewer.hud.setItemVisible('show_objects', bMapViewer);
+        viewer.hud.setItemVisible('show_items', bMapViewer);
+        viewer.hud.setItemVisible('show_collision', bMapViewer);
+        viewer.hud.setItemVisible('wireframe', bMapViewer);
+
+        viewer.layers['main_mesh'].setVisible(bMapViewer && bShowMainMeshChecked);
+        viewer.layers['solid_objects'].setVisible(bMapViewer && bShowObjectsChecked);
+        viewer.layers['items'].setVisible(bMapViewer && bShowItemsChecked);
+        viewer.layers['collision'].setVisible(bMapViewer && bShowCollisionChecked);
+        viewer.layers['model_viewer'].setVisible(bModelViewer);
+    });
+
+    viewer.hud.addSeparator();
+
+    viewer.hud.addMonitor('x', 'X', () => viewer.camera.position.x.toFixed(2));
+    viewer.hud.addMonitor('y', 'Y', () => viewer.camera.position.y.toFixed(2));
+    viewer.hud.addMonitor('z', 'Z', () => viewer.camera.position.z.toFixed(2));
+    viewer.hud.addMonitor('cam_speed', 'Camera speed', () => viewer.cameraSpeed);
+
+    viewer.hud.addCheckbox('enable_fog', 'Enable fog', (checked) => {
+        viewer.scene.fog.near = checked ? 1 : 65535;
+        viewer.scene.fog.far = checked ? 2000 : 65535;
+    });
+
+    viewer.hud.addCheckbox('low_res', 'Low resolution', (checked) => {
+        viewer.renderer.setPixelRatio(window.devicePixelRatio * (checked ? 0.5 : 1));
+    });
+
+    viewer.hud.addCheckbox('show_main_mesh', 'Show main mesh', (checked) => {
+        viewer.layers['main_mesh'].setVisible(checked);
+    }, true);
+
+    viewer.hud.addCheckbox('show_objects', 'Show objects', (checked) => {
+        viewer.layers['solid_objects'].setVisible(checked);
+    }, true);
+
+    viewer.hud.addCheckbox('show_items', 'Show items', (checked) => {
+        viewer.layers['items'].setVisible(checked);
+    }, true);
+
+    viewer.hud.addCheckbox('show_collision', 'Show collision', (checked) => {
+        viewer.layers['collision'].setVisible(checked);
+    });
+
+    viewer.hud.addCheckbox('wireframe', 'Wireframe', (checked) => {
+        viewer.layers['main_mesh'].objects[0].material.forEach(mat => {
+            mat.wireframe = checked;
+        });
+    });
+}
+
+function buildScene(abRom)
+{
+    var mapMesh = RR64ToTHREE.createMapMesh(rr64);
+    var mapCollisionMesh = RR64ToTHREE.createMapCollisionMesh(rr64);
+    var itemSprites = RR64ToTHREE.createPositionedItemSprites(rr64);
+    var objectMeshes = RR64ToTHREE.createPositionedObjectMeshes(rr64);
+
+    var modelViewerObjectMeshes = createModelViewerObjectMeshes(rr64);
+
+    viewer.layer('main_mesh').add(mapMesh);
+    viewer.layer('collision').add(mapCollisionMesh);
+    viewer.layer('solid_objects').add(objectMeshes);
+    viewer.layer('items').add(itemSprites);
+    viewer.layer('model_viewer').add(modelViewerObjectMeshes);
+
+    var modelViewerGridSize = 500*20;
+    var modelViewerGridDivisions = 20;
+    var modelViewerGrid = new THREE.GridHelper(modelViewerGridSize, modelViewerGridDivisions);
+    viewer.layers['model_viewer'].add(modelViewerGrid);
+
+    viewer.layers['collision'].setVisible(false);
+    viewer.layers['model_viewer'].setVisible(false);
+}
+
+function createModelViewerObjectMeshes(rr64)
+{
+    var meshes = [];
+    const margin = 500;
+    const modelsPerRow = 20;
+
+    for(var nModel = 0; nModel < rr64.objectModels.length; nModel++)
+    {
+        var x = (nModel % modelsPerRow) * margin - (10 * margin);
+        var z = ((nModel / modelsPerRow) | 0) * margin - (10 * margin);
+
+        var mesh = RR64ToTHREE.createMeshFromObjectModel(rr64.objectModels[nModel]);
+        mesh.position.set(x, 0, z);
+        meshes.push(mesh);
+    }
+
+    return meshes;
+}
+
+</script>
+</body>
+</html>

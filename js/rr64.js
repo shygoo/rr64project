@@ -210,8 +210,12 @@ RoadRash64.prototype.parseMapPartition = function(dvPartition)
 {
     var partition = {
         header: new MapPartitionHeader(dvPartition, 0x00),
-        subMeshes: []
+        subMeshes: [],
+        collision: []
     };
+
+    // need to keep track of these for collision later
+    var _packetOffsets = [];
 
     for(var nSubMesh = 0; nSubMesh < partition.header.numSubMeshes; nSubMesh++)
     {
@@ -224,92 +228,66 @@ RoadRash64.prototype.parseMapPartition = function(dvPartition)
             geometryPackets: []
         };
 
-
         var packetOffset = subMeshOffset + MapSubMeshHeader.SIZE;
 
         for(var nPacket = 0; nPacket < subMesh.header.numPackets; nPacket++)
         {
+            _packetOffsets.push({ nSubMesh: nSubMesh, nPacket: nPacket, packetOffset: packetOffset });
+
             var packet = RoadRash64.parseGeometryPacket(dvPartition, packetOffset);
             packetOffset += packet.header.packetSize;
-
             subMesh.geometryPackets.push(packet);
         }
 
         partition.subMeshes.push(subMesh);
     }
 
+    var collisionHeader = new CollisionHeader(dvPartition, partition.header.offsCollision);
+    for(var nGroup = 0; nGroup < collisionHeader.numGroups; nGroup++)
+    {
+        var collisionGroup = [];
+
+        var offsCollisionGroup = dvPartition.getUint16(partition.header.offsCollision + CollisionHeader.SIZE + nGroup * 2);
+        var groupHeader = new CollisionGroupHeader(dvPartition, partition.header.offsCollision + offsCollisionGroup);
+        var offsTriangleList = partition.header.offsCollision + offsCollisionGroup + CollisionGroupHeader.SIZE;
+
+        for(var nList = 0; nList < groupHeader.numTriangleLists; nList++)
+        {
+            var triangleList = {
+                surfaceTypeId: 0,
+                triangles: [],
+                nSubMesh: 0,
+                nPacket: 0
+            };
+
+            var triangleListHeader = new CollisionTriangleListHeader(dvPartition, offsTriangleList);
+            offsTriangleList += CollisionTriangleListHeader.SIZE;
+
+            // figure out which submesh/geometry packet this is for
+            var idx = _packetOffsets.findIndex(o => {
+                return o.packetOffset == (triangleListHeader.offsVertices - GeometryPacketHeader.SIZE);
+            });
+
+            triangleList.surfaceTypeId = triangleListHeader.surfaceTypeId;
+            triangleList.nSubMesh = _packetOffsets[idx].nSubMesh;
+            triangleList.nPacket = _packetOffsets[idx].nPacket;
+
+            for(var nTri = 0; nTri < triangleListHeader.numTriangles; nTri++)
+            {
+                var tri = new Triangle(dvPartition, offsTriangleList);
+                offsTriangleList += Triangle.SIZE;
+                triangleList.triangles.push(tri);
+            }
+
+            collisionGroup.push(triangleList)
+
+            if((offsTriangleList % 4) != 0) offsTriangleList += 2;
+        }
+
+        partition.collision.push(collisionGroup);
+    }
+
     return partition;
-
-    // collision
-    // todo optimize
-
-    //var collisionGeometry = new THREE.BufferGeometry();
-    //var collisionPositions = [];
-    //var collisionColors = [];
-//
-    //const surfaceTypeColors = [
-    //    /*00*/ null,
-    //    /*01*/ [1, 0, 0],
-    //    /*02*/ [0, 1, 0],
-    //    /*03*/ [0, 0, 1],
-    //    /*04*/ [1, 1, 0],
-    //    /*05*/ [1, 0, 1],
-    //    /*06*/ [0, 1, 1],
-    //    /*07*/ [1, 1, 1],
-    //    /*08*/ [0.5, 0, 0],
-    //    /*09*/ [0, 0.5, 0],
-    //    /*0A*/ [0, 0, 0.5],
-    //    /*0B*/ [0.5, 0.5, 0],
-    //    /*0C*/ [0.5, 0, 0.5],
-    //    /*0D*/ [0, 0.5, 0.5],
-    //    /*0E*/ [0.5, 0.5, 0.5]
-    //];
-//
-    //var collisionHeader = new CollisionHeader(dvMesh, meshHeader.offsCollision);
-    //for(var nGroup = 0; nGroup < collisionHeader.numGroups; nGroup++)
-    //{
-    //    var offsCollisionGroup = dvMesh.getUint16(meshHeader.offsCollision + CollisionHeader.SIZE + nGroup * 2);
-    //    var groupHeader = new CollisionGroupHeader(dvMesh, meshHeader.offsCollision + offsCollisionGroup);
-    //    var offsTriangleList = meshHeader.offsCollision + offsCollisionGroup + CollisionGroupHeader.SIZE;
-//
-    //    for(var nList = 0; nList < groupHeader.numTriangleLists; nList++)
-    //    {
-    //        var triangleListHeader = new CollisionTriangleListHeader(dvMesh, offsTriangleList);
-    //        offsTriangleList += CollisionTriangleListHeader.SIZE;
-//
-    //        var color = surfaceTypeColors[triangleListHeader.surfaceTypeId];
-//
-    //        for(var nTri = 0; nTri < triangleListHeader.numTriangles; nTri++)
-    //        {
-    //            var tri = new Triangle(dvMesh, offsTriangleList);
-    //            offsTriangleList += Triangle.SIZE;
-//
-    //            var vertex0 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v0 * SPVertex.SIZE);
-    //            var vertex1 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v1 * SPVertex.SIZE);
-    //            var vertex2 = new SPVertex(dvMesh, triangleListHeader.offsVertices + tri.v2 * SPVertex.SIZE);
-//
-    //            
-//
-    //            collisionPositions.push(-(meshHeader.worldX + vertex0.x), (meshHeader.worldZ + vertex0.z) / 2, (meshHeader.worldY + vertex0.y));
-    //            collisionPositions.push(-(meshHeader.worldX + vertex1.x), (meshHeader.worldZ + vertex1.z) / 2, (meshHeader.worldY + vertex1.y));
-    //            collisionPositions.push(-(meshHeader.worldX + vertex2.x), (meshHeader.worldZ + vertex2.z) / 2, (meshHeader.worldY + vertex2.y));
-//
-    //            collisionColors.push(color[0], color[1], color[2]);
-    //            collisionColors.push(color[0], color[1], color[2]);
-    //            collisionColors.push(color[0], color[1], color[2]);
-    //        }
-//
-    //        if((offsTriangleList % 4) != 0) offsTriangleList += 2;
-    //    }
-    //}
-//
-    //var fCollisionPositions = new Float32Array(collisionPositions);
-    //var fCollisionColors = new Float32Array(collisionColors);
-    //collisionGeometry.setAttribute('position', new THREE.BufferAttribute(fCollisionPositions, 3));
-    //collisionGeometry.setAttribute('color', new THREE.BufferAttribute(fCollisionColors, 3));
-    //var material = new THREE.MeshBasicMaterial({ wireframe: true, vertexColors: THREE.VertexColors });
-    //var collisionMesh = new THREE.Mesh(collisionGeometry, material);
-    //this.sceneAdd('collision', [ collisionMesh ]);
 }
 
 RoadRash64.prototype.getModelIndex = function(modelId_hi, modelId_lo)
@@ -394,7 +372,7 @@ RoadRash64.parseTextureFile = function(dvTexture)
     return { data: data, width: width, height: height, flags: textureHeader.flags, header: textureHeader };
 }
 
-//////////////
+// Structures
 
 function SPVertex(dv, offset)
 {
@@ -477,8 +455,6 @@ function GeometryPacketHeader(dv, offset)
 }
 
 GeometryPacketHeader.SIZE = 8;
-
-////////////
 
 function ObjectModelHeader(dv, offset)
 {
@@ -601,8 +577,6 @@ function ItemPlacement(dv, offset)
 
 ItemPlacement.SIZE = 0x10;
 
-//////////////////
-
 function ObjectPlacement(dv, offset)
 {
     // quaternion
@@ -638,8 +612,6 @@ function ObjectDefinition(dv, offset)
 
 ObjectDefinition.SIZE = 0x18;
 
-//////////////
-
 function Triangle(dv, offset)
 {
     var data = dv.getUint16(offset);
@@ -649,8 +621,6 @@ function Triangle(dv, offset)
 }
 
 Triangle.SIZE = 0x02;
-
-//////////////
 
 function CollisionHeader(dv, offset)
 {
