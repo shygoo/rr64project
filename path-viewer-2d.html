@@ -68,7 +68,7 @@ Viewer.prototype.drawPaths = function()
 {
     for(var i = 0; i < NUM_PATH_POINTS; i++)
     {
-        var offset = RA_PATH_DATA + i * 16;
+        var offset = RA_PATH_POINTS + i * 16;
         var unk00 = this.dvRom.getUint8(offset + 0x00);
         var unk01 = this.dvRom.getUint8(offset + 0x01);
         var unk02 = this.dvRom.getUint8(offset + 0x02);

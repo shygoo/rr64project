@@ -36,6 +36,7 @@ RR64ToTHREE.createMapMesh = function(rr64)
         dataTexture.wrapS = THREE.RepeatWrapping;
         dataTexture.wrapT = THREE.RepeatWrapping;
         dataTexture.magFilter = THREE.LinearFilter;
+        dataTexture.minFilter = THREE.LinearFilter;
 
         var material = new THREE.MeshBasicMaterial({
             vertexColors: THREE.VertexColors,
@@ -295,6 +296,7 @@ RR64ToTHREE.createGeometryAndMaterialsFromObjectModel = function(objectModel)
         dataTexture.wrapS = THREE.RepeatWrapping;
         dataTexture.wrapT = THREE.RepeatWrapping;
         dataTexture.magFilter = THREE.LinearFilter;
+        dataTexture.minFilter = THREE.LinearFilter;
         
         var material = new THREE.MeshBasicMaterial({
             side: THREE.BackSide,
@@ -375,4 +377,93 @@ RR64ToTHREE.createGeometryAndMaterialsFromObjectModel = function(objectModel)
     geometry.setIndex(indices);
 
     return { geometry: geometry, materials: materials };
+}
+
+RR64ToTHREE.createPointsFromPathData = function(rr64)
+{
+    // todo raycast to floor instead of just putting it above the map
+    const Z_OFFSET = 2000; 
+
+    var threeObjects = [];
+
+    var subPaths = [];
+    var curSubPath = null;
+
+    // 2, 4, 1, 4, 1, ... 3, 5, 5
+    var typeColors = [
+        /*00*/ null, //unused
+        /*01*/ [ 1.0, 1.0, 1.0 ],
+        /*02*/ [ 0.0, 1.0, 1.0 ],
+        /*03*/ [ 1.0, 0.0, 1.0 ],
+        /*04*/ [ 0.5, 0.5, 0.5 ],
+        /*05*/ [ 0.0, 0.0, 0.0]
+    ];
+
+    rr64.pathData.forEach(point => {
+        if(point.unk00 == 0x05) 
+        {
+            // what is this for? does not have x,y components
+            return;
+        }
+
+        if(point.unk00 == 0x02) // start a new path
+        {
+            curSubPath = { positions: [], colors: [] };
+            subPaths.push(curSubPath);
+        }
+
+        var color = typeColors[point.unk00];
+
+        curSubPath.positions.push(-point.x * 4, Z_OFFSET, point.y * 4);
+        curSubPath.colors.push(color[0], color[1], color[2]);
+    });
+
+    var pointsMaterial = new THREE.PointsMaterial({ vertexColors: THREE.VertexColors, size: 3, sizeAttenuation: false });
+    var lineMaterial = new THREE.LineBasicMaterial({ vertexColors: THREE.VertexColors });
+
+    subPaths.forEach(subPath =>
+    {
+        var geometry = new THREE.BufferGeometry();
+
+        var fPositions = new Float32Array(subPath.positions);
+        var fColors = new Float32Array(subPath.colors);
+    
+        geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+
+        var points = new THREE.Points(geometry, pointsMaterial);
+        var line = new THREE.Line(geometry, lineMaterial);
+
+        threeObjects.push(points, line);
+    });
+
+    return threeObjects;
+}
+
+RR64ToTHREE.createPointsFromRaces = function(rr64)
+{
+    // todo sprite labels of the race names
+    // todo raycast to floor instead of just putting it above the map
+    const Z_OFFSET = 2000;
+
+    var positions = [];
+    var colors = [];
+
+    rr64.races.forEach(race => {
+        positions.push(-race.startX * 4, Z_OFFSET, race.startY * 4);
+        positions.push(-race.endX * 4, Z_OFFSET, race.endY * 4);
+        colors.push(0, 1, 0);
+        colors.push(1, 0, 0);
+    });
+
+    var fPositions = new Float32Array(positions);
+    var fColors = new Float32Array(colors);
+
+    var geometry = new THREE.BufferGeometry();
+    var pointsMaterial = new THREE.PointsMaterial({ vertexColors: THREE.VertexColors, size: 5, sizeAttenuation: false });
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(fPositions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(fColors, 3));
+
+    return new THREE.Points(geometry, pointsMaterial);
 }

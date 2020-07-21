@@ -16,7 +16,7 @@ function Viewer(queryDomContainer, config)
         config.cameraDefaultZ || 0);
 
     this.scene = new THREE.Scene();
-    this.renderer = new THREE.WebGLRenderer({antialias: false});
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
 
     this.layers = {};
 

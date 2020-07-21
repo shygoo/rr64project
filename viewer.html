@@ -112,18 +112,24 @@ function setupViewerHUD()
         var bShowObjectsChecked = viewer.hud.getItemValue('show_objects');
         var bShowItemsChecked = viewer.hud.getItemValue('show_items');
         var bShowCollisionChecked = viewer.hud.getItemValue('show_collision');
+        var bShowRacesChecked = viewer.hud.getItemValue('show_races');
+        var bShowPathsChecked = viewer.hud.getItemValue('show_paths');
 
         viewer.hud.setItemVisible('show_main_mesh', bMapViewer);
         viewer.hud.setItemVisible('show_objects', bMapViewer);
         viewer.hud.setItemVisible('show_items', bMapViewer);
         viewer.hud.setItemVisible('show_collision', bMapViewer);
+        viewer.hud.setItemVisible('show_races', bMapViewer);
+        viewer.hud.setItemVisible('show_paths', bMapViewer);
         viewer.hud.setItemVisible('wireframe', bMapViewer);
 
-        viewer.layers['main_mesh'].setVisible(bMapViewer && bShowMainMeshChecked);
-        viewer.layers['solid_objects'].setVisible(bMapViewer && bShowObjectsChecked);
-        viewer.layers['items'].setVisible(bMapViewer && bShowItemsChecked);
-        viewer.layers['collision'].setVisible(bMapViewer && bShowCollisionChecked);
-        viewer.layers['model_viewer'].setVisible(bModelViewer);
+        viewer.layer('main_mesh').setVisible(bMapViewer && bShowMainMeshChecked);
+        viewer.layer('solid_objects').setVisible(bMapViewer && bShowObjectsChecked);
+        viewer.layer('items').setVisible(bMapViewer && bShowItemsChecked);
+        viewer.layer('collision').setVisible(bMapViewer && bShowCollisionChecked);
+        viewer.layer('races').setVisible(bMapViewer && bShowRacesChecked);
+        viewer.layer('paths').setVisible(bMapViewer && bShowPathsChecked);
+        viewer.layer('model_viewer').setVisible(bModelViewer);
     });
 
     viewer.hud.addSeparator();
@@ -142,27 +148,25 @@ function setupViewerHUD()
         viewer.renderer.setPixelRatio(window.devicePixelRatio * (checked ? 0.5 : 1));
     });
 
-    viewer.hud.addCheckbox('show_main_mesh', 'Show main mesh', (checked) => {
-        viewer.layers['main_mesh'].setVisible(checked);
-    }, true);
-
-    viewer.hud.addCheckbox('show_objects', 'Show objects', (checked) => {
-        viewer.layers['solid_objects'].setVisible(checked);
-    }, true);
-
-    viewer.hud.addCheckbox('show_items', 'Show items', (checked) => {
-        viewer.layers['items'].setVisible(checked);
-    }, true);
-
-    viewer.hud.addCheckbox('show_collision', 'Show collision', (checked) => {
-        viewer.layers['collision'].setVisible(checked);
-    });
-
     viewer.hud.addCheckbox('wireframe', 'Wireframe', (checked) => {
-        viewer.layers['main_mesh'].objects[0].material.forEach(mat => {
+        viewer.layer('main_mesh').objects[0].material.forEach(mat => {
             mat.wireframe = checked;
         });
     });
+
+    function hudAddLayerToggle(hudKey, label, layerName, defaultValue)
+    {
+        viewer.hud.addCheckbox(hudKey, label, (checked) => {
+            viewer.layer(layerName).setVisible(checked);
+        }, defaultValue);
+    }
+
+    hudAddLayerToggle('show_main_mesh', 'Show main mesh', 'main_mesh', true);
+    hudAddLayerToggle('show_objects', 'Show objects', 'solid_objects', true);
+    hudAddLayerToggle('show_items', 'Show items', 'items', true);
+    hudAddLayerToggle('show_collision', 'Show collision', 'collision', false);
+    hudAddLayerToggle('show_races', 'Show races', 'races', false);
+    hudAddLayerToggle('show_paths', 'Show paths', 'paths', false);
 }
 
 function buildScene(abRom)
@@ -171,7 +175,9 @@ function buildScene(abRom)
     var mapCollisionMesh = RR64ToTHREE.createMapCollisionMesh(rr64);
     var itemSprites = RR64ToTHREE.createPositionedItemSprites(rr64);
     var objectMeshes = RR64ToTHREE.createPositionedObjectMeshes(rr64);
-
+    var racePoints = RR64ToTHREE.createPointsFromRaces(rr64);
+    var pathPoints = RR64ToTHREE.createPointsFromPathData(rr64);
+    
     var modelViewerObjectMeshes = createModelViewerObjectMeshes(rr64);
 
     viewer.layer('main_mesh').add(mapMesh);
@@ -179,14 +185,18 @@ function buildScene(abRom)
     viewer.layer('solid_objects').add(objectMeshes);
     viewer.layer('items').add(itemSprites);
     viewer.layer('model_viewer').add(modelViewerObjectMeshes);
+    viewer.layer('races').add(racePoints);
+    viewer.layer('paths').add(pathPoints);
 
     var modelViewerGridSize = 500*20;
     var modelViewerGridDivisions = 20;
     var modelViewerGrid = new THREE.GridHelper(modelViewerGridSize, modelViewerGridDivisions);
-    viewer.layers['model_viewer'].add(modelViewerGrid);
+    viewer.layer('model_viewer').add(modelViewerGrid);
 
-    viewer.layers['collision'].setVisible(false);
-    viewer.layers['model_viewer'].setVisible(false);
+    viewer.layer('races').setVisible(false);
+    viewer.layer('paths').setVisible(false);
+    viewer.layer('collision').setVisible(false);
+    viewer.layer('model_viewer').setVisible(false);
 }
 
 function createModelViewerObjectMeshes(rr64)

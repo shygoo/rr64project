@@ -58,6 +58,8 @@ function RoadRash64(dvRom)
     this.objectPlacements = this.parseObjectPlacements();
     this.itemTextures = this.parseItemTextures();
     this.itemPlacements = this.parseItemPlacements();
+    this.pathData = this.parsePathData();
+    this.races = this.parseRaces();
 }
 
 RoadRash64.prototype.parseMapTextures = function()
@@ -288,6 +290,34 @@ RoadRash64.prototype.parseMapPartition = function(dvPartition)
     }
 
     return partition;
+}
+
+RoadRash64.prototype.parsePathData = function()
+{
+    var pathData = [];
+
+    for(var nPoint = 0; nPoint < NUM_PATH_POINTS; nPoint++)
+    {
+        var offsPoint = RA_PATH_POINTS + nPoint * PathPoint.SIZE;
+        var point = new PathPoint(this.dvRom, offsPoint);
+        pathData.push(point);
+    }
+
+    return pathData;
+}
+
+RoadRash64.prototype.parseRaces = function()
+{
+    var races = [];
+
+    for(var nRace = 0; nRace < NUM_RACES; nRace++)
+    {
+        var offsRace = RA_RACE_TABLE + nRace * Race.SIZE;
+        var race = new Race(this.dvRom, offsRace);
+        races.push(race);
+    }
+
+    return races;
 }
 
 RoadRash64.prototype.getModelIndex = function(modelId_hi, modelId_lo)
@@ -649,3 +679,30 @@ function CollisionTriangleListHeader(dv, offset)
 }
 
 CollisionTriangleListHeader.SIZE = 0x04;
+
+function Race(dv, offset)
+{
+    this.raceName = dvgetstr(dv, offset + 0x00);
+    /* ... */
+    this.startX = dv.getFloat32(offset + 0x34);
+    this.startY = dv.getFloat32(offset + 0x38);
+    this.unk3C = dv.getFloat32(offset + 0x3C);
+    this.endX = dv.getFloat32(offset + 0x40);
+    this.endY = dv.getFloat32(offset + 0x44);
+    this.unk48 = dv.getFloat32(offset + 0x48);
+}
+
+Race.SIZE = 0x4C;
+
+function PathPoint(dv, offset)
+{
+    this.unk00 = dv.getUint8(offset + 0x00);
+    this.unk01 = dv.getUint8(offset + 0x01);
+    this.unk02 = dv.getUint8(offset + 0x02);
+    this.unk03 = dv.getUint8(offset + 0x03);
+    this.unk04 = dv.getUint32(offset + 0x04);
+    this.x = dv.getFloat32(offset + 0x08);
+    this.y = dv.getFloat32(offset + 0x0C);
+}
+
+PathPoint.SIZE = 0x10;
