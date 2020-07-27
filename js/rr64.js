@@ -360,7 +360,6 @@ RoadRash64.parseGeometryPacket = function(dv, packetOffset)
 
 RoadRash64.parseTextureFile = function(dvTexture)
 {
-    // TODO handle animated textures
     var textureHeader = new TextureHeader(dvTexture, 0);
     var texelsOffset = TextureHeader.SIZE;
     var width = textureHeader.width;
@@ -368,38 +367,48 @@ RoadRash64.parseTextureFile = function(dvTexture)
 
     var bIntensity = !!(textureHeader.flags & 0x8000);
 
-    var data = null;
+    var frames = [];
 
-    if(textureHeader.bitDepth == 4)
+    for(var nFrame = 0; nFrame < textureHeader.numFrames; nFrame++)
     {
-        if(bIntensity)
+        var data = null;
+
+        if(textureHeader.bitDepth == 4)
         {
-            data = rgba32_texture_from_i4(dvTexture, texelsOffset, width, height);
+            if(bIntensity)
+            {
+                data = rgba32_texture_from_i4(dvTexture, texelsOffset, width, height);
+            }
+            else
+            {
+                var tlutOffset = texelsOffset + (width * height) / 2;
+                data = rgba32_texture_from_ci4(dvTexture, texelsOffset, tlutOffset, width, height);
+            }
         }
-        else
+        else if(textureHeader.bitDepth == 8)
         {
-            var tlutOffset = texelsOffset + (width * height) / 2;
-            data = rgba32_texture_from_ci4(dvTexture, texelsOffset, tlutOffset, width, height);
+            if(bIntensity)
+            {
+                data = rgba32_texture_from_i8(dvTexture, texelsOffset, width, height);
+            }
+            else
+            {
+                var tlutOffset = texelsOffset + (width * height);
+                data = rgba32_texture_from_ci8(dvTexture, texelsOffset, tlutOffset, width, height);
+            }
         }
-    }
-    else if(textureHeader.bitDepth == 8)
-    {
-        if(bIntensity)
-        {
-            data = rgba32_texture_from_i8(dvTexture, texelsOffset, width, height);
-        }
-        else
-        {
-            var tlutOffset = texelsOffset + (width * height);
-            data = rgba32_texture_from_ci8(dvTexture, texelsOffset, tlutOffset, width, height);
-        }
-    }
-    else
-    {
-        return null;
+
+        //if(textureHeader.numFrames > 1)
+        //{
+        //    print_rgba32_texture(data, width, height);
+        //}
+
+        frames.push(data);
+        texelsOffset += textureHeader.unk3C; // .numBytesPerFrame?
     }
 
-    return { data: data, width: width, height: height, flags: textureHeader.flags, header: textureHeader };
+
+    return { frames: frames, width: width, height: height, flags: textureHeader.flags, header: textureHeader };
 }
 
 // Structures

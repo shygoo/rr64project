@@ -59,6 +59,7 @@ body, html {
 
 var viewer = null;
 var rr64 = null;
+var selectionBox = null;
 
 attachFileReader('#file', onromloaded, onromloading)
 attachDropZone('body', onromloaded, onromloading);
@@ -77,11 +78,19 @@ function onromloaded(ab)
         cameraDefaultX: 0,
         cameraDefaultY: 4000,
         cameraDefaultZ: 0,
-        cameraSpeed: 30
+        cameraSpeed: 30,
+        pickfilter: pickfilter,
+        onpick: onpick,
+        onanimate: onanimate
     };
 
     rr64 = new RoadRash64(new DataView(ab));
     viewer = new Viewer('#container', config);
+
+    selectionBox = createSelectionBox();
+    selectionBox.visible = false;
+    viewer.layer('object_selection').add(selectionBox);
+
     viewer.animate();
     
     setupViewerHUD();
@@ -99,6 +108,8 @@ function setupViewerHUD()
 
     viewer.hud.addSelect('mode', 'Mode', modeOptions, selection =>
     {
+        selectionBox.visible = false;
+
         var bMapViewer = (selection.value == "Map viewer");
         var bModelViewer = (selection.value == "Model viewer");
 
@@ -175,8 +186,9 @@ function buildScene(abRom)
     var mapCollisionMesh = RR64ToTHREE.createMapCollisionMesh(rr64);
     var itemSprites = RR64ToTHREE.createPositionedItemSprites(rr64);
     var objectMeshes = RR64ToTHREE.createPositionedObjectMeshes(rr64);
-    var racePoints = RR64ToTHREE.createPointsFromRaces(rr64);
-    var pathPoints = RR64ToTHREE.createPointsFromPathData(rr64);
+
+    var racePoints = RR64ToTHREE.createPointsFromRaces(rr64, mapMesh);
+    var pathPoints = RR64ToTHREE.createPointsFromPathData(rr64, mapMesh);
     
     var modelViewerObjectMeshes = createModelViewerObjectMeshes(rr64);
 
@@ -199,6 +211,145 @@ function buildScene(abRom)
     viewer.layer('model_viewer').setVisible(false);
 }
 
+function pickfilter()
+{
+    return [].concat(
+        viewer.layer('solid_objects').objects,
+        viewer.layer('model_viewer').objects);
+}
+
+function onpick(objects)
+{
+    if(objects.length == 0)
+    {
+        selectionBox.visible = false;
+        return;
+    }
+
+    var intersection = this.raycaster.intersectObject(objects[0].object);
+    var object = intersection[0].object;
+
+    if(!object.visible || !object.userData)
+    {
+        selectionBox.visible = false;
+        return;
+    }
+
+    var boundingBox = new THREE.Box3().setFromObject(object);
+    var boundingBoxSize = new THREE.Vector3();
+    var boundingBoxCenter = new THREE.Vector3();
+    var centerMtx = new THREE.Matrix4();
+    var scaleMtx = new THREE.Matrix4();
+    var instanceMtx = new THREE.Matrix4();
+
+    boundingBox.getSize(boundingBoxSize);
+    boundingBoxSize.clampScalar(0.01, Infinity);
+
+    boundingBox.getCenter(boundingBoxCenter);
+    boundingBoxCenter.sub(object.position);
+
+    centerMtx.makeTranslation(boundingBoxCenter.x, boundingBoxCenter.y, boundingBoxCenter.z);
+    scaleMtx.makeScale(boundingBoxSize.x, boundingBoxSize.y, boundingBoxSize.z);
+
+    selectionBox.position.set(0, 0, 0);
+    selectionBox.rotation.set(0, 0, 0);
+    selectionBox.scale.set(1, 1, 1);
+
+    var userData = null;
+
+    if(object.constructor.name == 'InstancedMesh')
+    {
+        var instanceId = intersection[0].instanceId
+        object.getMatrixAt(instanceId, instanceMtx);
+
+        userData = object.userData[instanceId];
+    }
+    else if(object.constructor.name == 'Mesh')
+    {
+        instanceMtx.copy(object.matrix);
+        userData = object.userData;
+    }
+
+    if(userData.type == 'map_object_placement')
+    {
+        var objectPlacement = rr64.objectPlacements[userData.nObjectPlacement];
+        var objectDefinition = rr64.objectDefinitions[objectPlacement.objectIndex];
+        var nObjectModel = rr64.getModelIndex(objectDefinition.modelId_hi, objectDefinition.modelId_lo);
+        var objectModel = rr64.objectModels[nObjectModel];
+
+        var textureNames = objectModel.textures.map(t => t.header.fileName);
+
+        console.log([objectPlacement, objectDefinition, objectModel]);
+        console.log(textureNames);
+    }
+    else if(userData.type == 'model_viewer_model')
+    {
+        var objectModel = rr64.objectModels[userData.nObjectModel];
+        var textureNames = objectModel.textures.map(t => t.header.fileName);
+        console.log(objectModel);
+        console.log(textureNames);
+    }
+
+    selectionBox.applyMatrix4(scaleMtx);
+    selectionBox.applyMatrix4(centerMtx);
+    selectionBox.applyMatrix4(instanceMtx);
+
+    selectionBox.visible = true;
+}
+
+function onanimate()
+{
+    viewer.layer('items').objects.forEach(o => {
+        var intensity = (viewer.counter % 30) / 30;
+        var color = new THREE.Color(1, intensity/4, 0);
+        o.material.color.set(color);
+    });
+
+    const step = (100/60)*10;
+
+    var animatedMaterials = {};
+
+    viewer.layer('model_viewer').objects.forEach(o =>
+    {
+        function cacheIfAnimated(m)
+        {
+            if(m.userData && m.userData.animMaps)
+            {
+                animatedMaterials[m.uuid] = m;
+            }
+        }
+
+        if(Array.isArray(o.material))
+        {
+            o.material.forEach(m => cacheIfAnimated(m));
+        }
+        else
+        {
+            cacheIfAnimated(o.material);
+        }
+    });
+
+    for(var uuid in animatedMaterials)
+    {
+        var m = animatedMaterials[uuid];
+        m.userData.dt += step;
+        if(m.userData.dt >= m.userData.timePerFrame)
+        {
+            m.userData.animIndex = (m.userData.animIndex + 1) % m.userData.animMaps.length;
+            m.map = m.userData.animMaps[m.userData.animIndex];
+            m.userData.dt = 0;
+        }
+    }
+}
+
+function createSelectionBox()
+{
+    var geometry = new THREE.BoxGeometry(1,1,1);
+    var material = new THREE.MeshBasicMaterial({wireframe: true, color: 0xFF0000})
+    var mesh = new THREE.Mesh(geometry, material);
+    return mesh;
+}
+
 function createModelViewerObjectMeshes(rr64)
 {
     var meshes = [];
@@ -212,6 +363,7 @@ function createModelViewerObjectMeshes(rr64)
 
         var mesh = RR64ToTHREE.createMeshFromObjectModel(rr64.objectModels[nModel]);
         mesh.position.set(x, 0, z);
+        mesh.userData = { type: 'model_viewer_model', nObjectModel: nModel };
         meshes.push(mesh);
     }
 

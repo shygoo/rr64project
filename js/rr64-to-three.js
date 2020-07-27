@@ -27,16 +27,23 @@ RR64ToTHREE.createMapMesh = function(rr64)
 
         var textureFile = rr64.mapTextures[nMapTexture];
 
-        var dataTexture = new THREE.DataTexture(
-            textureFile.data,
-            textureFile.width,
-            textureFile.height,
-            THREE.RGBAFormat);
+        var dataTextures = [];
 
-        dataTexture.wrapS = THREE.RepeatWrapping;
-        dataTexture.wrapT = THREE.RepeatWrapping;
-        dataTexture.magFilter = THREE.LinearFilter;
-        dataTexture.minFilter = THREE.LinearFilter;
+        textureFile.frames.forEach(frameData =>
+        {
+            var dataTexture = new THREE.DataTexture(
+                frameData,
+                textureFile.width,
+                textureFile.height,
+                THREE.RGBAFormat);
+
+            dataTexture.wrapS = THREE.RepeatWrapping;
+            dataTexture.wrapT = THREE.RepeatWrapping;
+            dataTexture.magFilter = THREE.LinearFilter;
+            dataTexture.minFilter = THREE.LinearFilter;
+
+            dataTextures.push(dataTexture);
+        });
 
         var material = new THREE.MeshBasicMaterial({
             vertexColors: THREE.VertexColors,
@@ -44,10 +51,16 @@ RR64ToTHREE.createMapMesh = function(rr64)
             polygonOffset: true,
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
-            map: dataTexture,
+            map: dataTextures[0],
             transparent: !!(textureFile.flags & 0x4000),
             alphaTest: 0.3
         });
+
+        if(textureFile.frames.length > 1)
+        {
+            material.userData = { animMaps: dataTextures, animIndex: 0, timePerFrame: textureFile.header.unk28, dt: 0 };
+            //console.log(textureFile.header);
+        }
 
         mapMaterials.push(material);
     }
@@ -69,6 +82,7 @@ RR64ToTHREE.createMapMesh = function(rr64)
             if(!textureFile)
             {
                 console.log("texture undefined; nMapPartition:", nMapPartition, "nSubMesh:", nSubMesh);
+                subMesh.header.textureFileIndex = 0;
             }
 
             var texWidth = textureFile ? textureFile.width : 1;
@@ -204,14 +218,14 @@ RR64ToTHREE.createPositionedItemSprites = function(rr64)
 
     rr64.itemTextures.forEach(data => {
         var dataTexture = new THREE.DataTexture(data, 64, 64, THREE.RGBAFormat);
-        var material = new THREE.SpriteMaterial({ map: dataTexture, color: 0xFF0000 });
+        var material = new THREE.SpriteMaterial({ map: dataTexture, color: 0xFF0000, fog: false });
         materials.push(material);
     });
 
     rr64.itemPlacements.forEach(item => {
         var sprite = new THREE.Sprite(materials[ITEM_TEX_INDICES[item.itemId]]);
         sprite.position.set(-item.x * 4, item.z * 4, item.y * 4);
-        sprite.scale.set(15, 15, 15);
+        sprite.scale.set(10, 10, 10);
         sprites.push(sprite);
     });
 
@@ -220,7 +234,7 @@ RR64ToTHREE.createPositionedItemSprites = function(rr64)
 
 RR64ToTHREE.createPositionedObjectMeshes = function(rr64)
 {
-    // group placements by model id
+    // group placements by model index
     var instances = {};
 
     for(var nObjectPlacement in rr64.objectPlacements)
@@ -235,30 +249,35 @@ RR64ToTHREE.createPositionedObjectMeshes = function(rr64)
             instances[modelIndex] = [];
         }
 
-        instances[modelIndex].push(objectPlacement);
+        instances[modelIndex].push(nObjectPlacement);
     }
 
     var meshes = [];
 
     for(var modelIndex in instances)
     {
-        var objectPlacements = instances[modelIndex];
+        var placementIndices = instances[modelIndex];
         var objectModel = rr64.objectModels[modelIndex];
 
-        var instancedMesh = RR64ToTHREE.createInstancedMeshFromObjectModel(objectModel, objectPlacements.length);
-        
-        for(var nObjectPlacement in objectPlacements)
+        var instancedMesh = RR64ToTHREE.createInstancedMeshFromObjectModel(objectModel, placementIndices.length);
+        var userData = [];
+
+        for(var i in placementIndices)
         {
-            var p = objectPlacements[nObjectPlacement];
+            var nObjectPlacement = placementIndices[i];
+            var p = rr64.objectPlacements[nObjectPlacement];
+
             var position = new THREE.Vector3(-p.posX * 4, p.posZ * 4, p.posY * 4);
             var quaternion = new THREE.Quaternion(p.qX, p.qZ, p.qY, p.qW);
             var scale = new THREE.Vector3(0.5, 0.5, 0.5);
             var matrix = new THREE.Matrix4();
             matrix.compose(position, quaternion, scale);
 
-            instancedMesh.setMatrixAt(nObjectPlacement, matrix);
+            instancedMesh.setMatrixAt(i, matrix);
+            userData.push({ type: 'map_object_placement', nObjectPlacement: nObjectPlacement | 0 });
         }
 
+        instancedMesh.userData = userData;
         meshes.push(instancedMesh);
     }
 
@@ -292,18 +311,30 @@ RR64ToTHREE.createGeometryAndMaterialsFromObjectModel = function(objectModel)
     {
         var textureFile = objectModel.textures[texIndex];
         
-        var dataTexture = new THREE.DataTexture(textureFile.data, textureFile.width, textureFile.height, THREE.RGBAFormat);
-        dataTexture.wrapS = THREE.RepeatWrapping;
-        dataTexture.wrapT = THREE.RepeatWrapping;
-        dataTexture.magFilter = THREE.LinearFilter;
-        dataTexture.minFilter = THREE.LinearFilter;
+        var dataTextures = [];
+
+        textureFile.frames.forEach(frameData =>
+        {
+            var dataTexture = new THREE.DataTexture(
+                frameData,
+                textureFile.width,
+                textureFile.height,
+                THREE.RGBAFormat);
+
+            dataTexture.wrapS = THREE.RepeatWrapping;
+            dataTexture.wrapT = THREE.RepeatWrapping;
+            dataTexture.magFilter = THREE.LinearFilter;
+            dataTexture.minFilter = THREE.LinearFilter;
+
+            dataTextures.push(dataTexture);
+        });
         
         var material = new THREE.MeshBasicMaterial({
             side: THREE.BackSide,
             polygonOffset: true,
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
-            map: dataTexture,
+            map: dataTextures[0],
             transparent: !!(textureFile.flags & 0x4000)
         });
 
@@ -312,6 +343,11 @@ RR64ToTHREE.createGeometryAndMaterialsFromObjectModel = function(objectModel)
             material.alphaTest = 0.3;
         }
         
+        if(textureFile.frames.length > 1)
+        {
+            material.userData = { animMaps: dataTextures, animIndex: 0, timePerFrame: textureFile.header.unk28, dt: 0 };
+        }
+
         materials.push(material);
     }
 
@@ -379,9 +415,8 @@ RR64ToTHREE.createGeometryAndMaterialsFromObjectModel = function(objectModel)
     return { geometry: geometry, materials: materials };
 }
 
-RR64ToTHREE.createPointsFromPathData = function(rr64)
+RR64ToTHREE.createPointsFromPathData = function(rr64, mapMesh)
 {
-    // todo raycast to floor instead of just putting it above the map
     const Z_OFFSET = 2000; 
 
     var threeObjects = [];
@@ -399,6 +434,11 @@ RR64ToTHREE.createPointsFromPathData = function(rr64)
         /*05*/ [ 0.0, 0.0, 0.0]
     ];
 
+    var raycaster = new THREE.Raycaster();
+    var rayOrigin = new THREE.Vector3();
+    var rayDirection = new THREE.Vector3(0, -1, 0);
+    raycaster.ray.direction.copy(rayDirection);
+
     rr64.pathData.forEach(point => {
         if(point.unk00 == 0x05) 
         {
@@ -413,6 +453,19 @@ RR64ToTHREE.createPointsFromPathData = function(rr64)
         }
 
         var color = typeColors[point.unk00];
+
+        // way too slow
+        //raycaster.ray.origin.set(-point.x * 4, Z_OFFSET, point.y * 4);
+        //var intersections = raycaster.intersectObject(mapMesh);
+        //var ipoint = null;
+        //if(intersections.length == 0)
+        //{
+        //    ipoint = new THREE.Vector3(-point.x * 4, 0, point.y * 4)
+        //}
+        //else
+        //{
+        //    ipoint = intersections[intersections.length-1].point;
+        //}
 
         curSubPath.positions.push(-point.x * 4, Z_OFFSET, point.y * 4);
         curSubPath.colors.push(color[0], color[1], color[2]);
@@ -443,7 +496,6 @@ RR64ToTHREE.createPointsFromPathData = function(rr64)
 RR64ToTHREE.createPointsFromRaces = function(rr64)
 {
     // todo sprite labels of the race names
-    // todo raycast to floor instead of just putting it above the map
     const Z_OFFSET = 2000;
 
     var positions = [];
